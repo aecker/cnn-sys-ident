@@ -1,4 +1,4 @@
-# CNN-based system idetification
+# CNN-based system identification
 
 This repository contains tools for fitting CNNs to neural responses. 
 
