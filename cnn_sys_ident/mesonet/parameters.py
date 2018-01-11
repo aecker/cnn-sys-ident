@@ -1,5 +1,6 @@
 import datajoint as dj
 from itertools import product
+from collections import OrderedDict
 
 from ..database import parameters
 
@@ -36,3 +37,21 @@ class CoreConfig(parameters.CoreConfig, dj.Lookup):
                              self._filter_size, self._num_filters, self._stride, self._rate, self._padding,
                              self._activation_fn, self._rel_smooth_weight, self._rel_sparse_weight):
                 yield self.encode_params_for_db(dict(zip(self.parameter_names, p)))
+
+
+@schema
+class ReadoutConfig(parameters.ReadoutConfig, dj.Lookup):
+
+    class SpatialXFeatureJointL1(parameters.RegularizableConfig, dj.Part):
+        _regularization_parameters = ['readout_sparsity']
+        _parameters = OrderedDict([
+            ('positive_feature_weights', 'boolean # enforce positive feature weights?'),
+        ])
+        _readout_sparsity_min = [0.01]
+        _readout_sparsity_max = [0.04]
+        _positive_feature_weights = [False, True]
+
+        @property
+        def content(self):
+            for p in product(self._readout_sparsity_min, self._readout_sparsity_max, self._positive_feature_weights):
+                yield(dict(zip(self.parameter_names, p)))

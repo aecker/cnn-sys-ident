@@ -9,8 +9,13 @@ import numpy as np
 
 # from ..architectures import readouts, modulators, shifters
 # from .data import MesoNetMultiDataset, MesoNet
-from ..architectures import cores
+from ..architectures import cores, readouts
+from cnn_sys_ident import architectures
 
+
+"""
+General-purpose helpers for configurations
+"""
 
 class Config(Messager):
     _config_type = None
@@ -50,29 +55,29 @@ class Config(Messager):
         p = part().decode_params_from_db(p)
         return p
 
-
-class CoreConfig(Config):
-    _config_type = 'core'
-
-    def build(self, key, base, images, reg_params):
-        core_key = self.parameters(key)
-        core_type = core_key.pop('core_type')
-        part = getattr(self, core_type)
-        core_name = part.core_name
-        assert hasattr(cores, core_name), '''Cannot find core for {core_name}.
-                                             Core needs to be names "{core_name}Core"
-                                             in architectures.cores'''.format(core_name=core_name)
-        Core = getattr(cores, core_name)
-        return Core(base, images, **core_key, **reg_params)
+    def build(self, key, base, inputs, regularization_parameters):
+        parameters = self.parameters(key)
+        the_type = parameters.pop(self._config_type + '_type')
+        part = getattr(self, the_type)
+        class_name = part().class_name + self._config_type.title()
+        module = getattr(architectures, self._config_type + 's')
+        assert hasattr(module, class_name), (
+            '''Cannot find {config_type} for {name}. '''
+            '''It needs to be named "{name}{Config_type} in architectures.{config_type}s'''.format(
+                config_type=self._config_type, 
+                Config_type=self._config_type.title(),
+                name=class_name))
+        the_class = getattr(module, class_name)
+        return the_class(base, inputs, **parameters, **regularization_parameters)
 
 
 class ConfigPart:
-    @property
-    def core_name(self):
-        return '{}Core'.format(self.__class__.__name__)
-
     def decode_params_from_db(self, p):
         return p
+    
+    @property
+    def class_name(self):
+        return self.__class__.__name__
 
 
 class RegularizableConfig(ConfigPart):
@@ -84,6 +89,7 @@ class RegularizableConfig(ConfigPart):
         for par in self._regularization_parameters:
             p.append(par + '_min')
             p.append(par + '_max')
+        p += list(self._parameters.keys())    
         return p
             
     @property
@@ -99,6 +105,9 @@ class RegularizableConfig(ConfigPart):
                     {param}_min : float # minimum value for {param}
                     {param}_max : float # maximum value for {param}
                     """.format(param=param)
+        for key, val in self._parameters.items():
+            def_str += """
+                    {key} : {val}""".format(key=key, val=val)
         return def_str
 
     def decode_params_from_db(self, p):
@@ -108,6 +117,15 @@ class RegularizableConfig(ConfigPart):
         return p
 
 
+
+"""
+Helpers for core configurations
+"""
+
+class CoreConfig(Config):
+    _config_type = 'core'
+
+
 class StackedConfig(RegularizableConfig):
     _num_layers = None
     _unique_parameters = None
@@ -115,17 +133,12 @@ class StackedConfig(RegularizableConfig):
 
     @property
     def parameter_names(self):
-        return super().parameter_names \
-             + list(self._unique_parameters.keys()) \
-             + list(self._stacked_parameters.keys())
+        return super().parameter_names + list(self._stacked_parameters.keys())
     
     @property
     def definition(self):
         assert self._num_layers is not None, 'self._num_layers not set!'
         def_str = super().definition
-        for key, val in self._unique_parameters.items():
-            def_str += """
-                    {key} : {val}""".format(key=key, val=val)
         for i in range(self._num_layers):
             for key, val in self._stacked_parameters.items():
                 def_str += """
@@ -148,7 +161,7 @@ class StackedConfig(RegularizableConfig):
 class StackedConv2dConfig(StackedConfig):
     core_name = 'StackedConv2dCore'
     _regularization_parameters = ['conv_smooth_weight', 'conv_sparse_weight']
-    _unique_parameters = OrderedDict()
+    _parameters = OrderedDict()
     _stacked_parameters = OrderedDict([
         ('filter_size',       'tinyint        # filter size'),
         ('num_filters',       'smallint       # number of filters'),
@@ -159,10 +172,14 @@ class StackedConv2dConfig(StackedConfig):
         ('rel_smooth_weight', 'float          # relative weight for smoothness regularizer'),
         ('rel_sparse_weight', 'float          # relative weight for sparseness regularizer'),
     ])
+    
+    @property
+    def class_name(self):
+        return 'StackedConv2d'
 
 
 class StackedRotEquiConv2dConfig(StackedConfig):
-    _unique_parameters = OrderedDict([
+    _parameters = OrderedDict([
         ('num_rotations',     'tinyint               # number of rotations'),
     ])
     _stacked_parameters = OrderedDict([
@@ -176,3 +193,12 @@ class StackedRotEquiConv2dConfig(StackedConfig):
         ('rel_sparse_weight', 'float                 # relative weight for sparseness regularizer'),
     ])
         
+
+
+"""
+Helpers for readout configurations
+"""
+
+class ReadoutConfig(Config):
+    _config_type = 'readout'
+
