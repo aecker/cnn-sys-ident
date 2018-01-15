@@ -1,5 +1,6 @@
 from collections import OrderedDict, namedtuple
 from inspect import isclass
+import hashlib
 
 from ..utils.logging import Messager
 from ..utils.data import key_hash, to_native
@@ -17,8 +18,8 @@ from cnn_sys_ident import architectures
 General-purpose helpers for configurations
 """
 
-class Config(Messager):
-    _config_type = None
+class Component(Messager):
+    _type = None
 
     @property
     def definition(self):
@@ -29,13 +30,18 @@ class Config(Messager):
         ---
         {ct}_type                   : varchar(50)  # type
         {ct}_ts=CURRENT_TIMESTAMP   : timestamp    # automatic
-        """.format(ct=self._config_type, cn=self.__class__.__name__)
+        """.format(ct=self._type, cn=self.__class__.__name__)
+
+    @property
+    def parts(self):
+        for member in dir(self):
+            if isclass(getattr(self, member)) and issubclass(getattr(self, member), dj.Part):
+                yield getattr(self, member)
 
     def fill(self):
-        type_name = self._config_type + '_type'
-        hash_name = self._config_type + '_hash'
-        for rel in [getattr(self, member) for member in dir(self)
-                    if isclass(getattr(self, member)) and issubclass(getattr(self, member), dj.Part)]:
+        type_name = self._type + '_type'
+        hash_name = self._type + '_hash'
+        for rel in self.parts:
             self.msg('Checking', rel.__name__)
             for key in rel().content:
                 key[type_name] = rel.__name__
@@ -47,7 +53,7 @@ class Config(Messager):
                     rel().insert1(key, ignore_extra_fields=True)
 
     def parameters(self, key):
-        type_name = self._config_type + '_type'
+        type_name = self._type + '_type'
         print((self & key))
         key = (self & key).fetch1()  # complete parameters
         part = getattr(self, key[type_name])
@@ -57,21 +63,19 @@ class Config(Messager):
 
     def build(self, key, base, inputs, regularization_parameters):
         parameters = self.parameters(key)
-        the_type = parameters.pop(self._config_type + '_type')
+        the_type = parameters.pop(self._type + '_type')
         part = getattr(self, the_type)
-        class_name = part().class_name + self._config_type.title()
-        module = getattr(architectures, self._config_type + 's')
+        class_name = part().class_name + self._type.title()
+        module = getattr(architectures, self._type + 's')
         assert hasattr(module, class_name), (
-            '''Cannot find {config_type} for {name}. '''
-            '''It needs to be named "{name}{Config_type} in architectures.{config_type}s'''.format(
-                config_type=self._config_type, 
-                Config_type=self._config_type.title(),
-                name=class_name))
+            '''Cannot find {t} for {name}. '''
+            '''It needs to be named "{name}{T} in architectures.{config_type}s'''.format(
+                t=self._type, T=self._type.title(), name=class_name))
         the_class = getattr(module, class_name)
         return the_class(base, inputs, **parameters, **regularization_parameters)
 
 
-class ConfigPart:
+class ComponentPart:
     def decode_params_from_db(self, p):
         return p
     
@@ -80,8 +84,9 @@ class ConfigPart:
         return self.__class__.__name__
 
 
-class RegularizableConfig(ConfigPart):
+class RegularizableComponent(ComponentPart):
     _regularization_parameters = None
+    _parameters = OrderedDict()
 
     @property
     def parameter_names(self):
@@ -116,19 +121,64 @@ class RegularizableConfig(ConfigPart):
             p.pop(par + '_max')
         return p
 
+    def sample_regularization_parameters(self, key, seed):
+        reg_params = dict()
+        for p in self._regularization_parameters:
+            p_min, p_max = (self & key).fetch1(p + '_min', p + '_max')
+            p_seed = (seed + int(hashlib.md5(p.encode('utf8')).hexdigest(), 16)) % (2 ** 32)
+            state = np.random.RandomState(seed=p_seed)
+            rnd = np.exp(state.uniform(np.log(p_min), np.log(p_max)))
+            reg_params[p] = rnd
+        return reg_params
+
+
+def regularizable(components):  # components: list [Core, Readout]
+    def add_subtables(model):
+        setattr(model, '_components', components)
+        for c in components:
+            for part in c().parts:
+                definition = """
+                        -> master
+                        seed : int # random number generator seed
+                        ---
+                        """
+                for p in part._regularization_parameters:
+                    definition += """
+                        {param_name} : float # {param_name}""".format(param_name=p)
+                setattr(model, part.__name__, type(
+                    part.__name__, (dj.Part, ), dict(definition=definition)))
+        return model
+    return add_subtables
+
+
+class RegularizableModel(Messager):
+    _components = []
+    
+    def fill(self):
+        self.msg('TO DO: Set contents of self!')
+        self.msg('TO DO: Set seed in a meaningful way!')
+        for c in self._components:
+            self.msg('Inserting {}s'.format(c._type))
+            type_name = c._type + '_type'
+            for key, part_name, num_models in zip(*(self * c()).fetch(dj.key, type_name, 'num_models')):
+                c_part = getattr(c, part_name)()
+                part = getattr(self, part_name)()
+                for seed in range(num_models):
+                    reg_params = c_part.sample_regularization_parameters(key, seed)
+                    tupl = dict(key, seed=seed, **reg_params)
+                    part.insert1(tupl)#, ignore_extra_fields=True)
 
 
 """
 Helpers for core configurations
 """
 
-class CoreConfig(Config):
-    _config_type = 'core'
+class Core(Component):
+    _type = 'core'
 
 
-class StackedConfig(RegularizableConfig):
+class Stacked(RegularizableComponent):
     _num_layers = None
-    _unique_parameters = None
     _stacked_parameters = None
 
     @property
@@ -158,8 +208,7 @@ class StackedConfig(RegularizableConfig):
         return p
 
 
-class StackedConv2dConfig(StackedConfig):
-    core_name = 'StackedConv2dCore'
+class StackedConv2d(Stacked):
     _regularization_parameters = ['conv_smooth_weight', 'conv_sparse_weight']
     _parameters = OrderedDict()
     _stacked_parameters = OrderedDict([
@@ -178,7 +227,7 @@ class StackedConv2dConfig(StackedConfig):
         return 'StackedConv2d'
 
 
-class StackedRotEquiConv2dConfig(StackedConfig):
+class StackedRotEquiConv2d(Stacked):
     _parameters = OrderedDict([
         ('num_rotations',     'tinyint               # number of rotations'),
     ])
@@ -199,6 +248,12 @@ class StackedRotEquiConv2dConfig(StackedConfig):
 Helpers for readout configurations
 """
 
-class ReadoutConfig(Config):
-    _config_type = 'readout'
+class Readout(Component):
+    _type = 'readout'
 
+
+class SpatialXFeatureJointL1(RegularizableComponent):
+    _regularization_parameters = ['readout_sparsity']
+    _parameters = OrderedDict([
+        ('positive_feature_weights', 'boolean # enforce positive feature weights?'),
+    ])
