@@ -1,17 +1,16 @@
 import datajoint as dj
 from itertools import product
-from collections import OrderedDict
 
-from ..database import parameters as p
+from ..database import model, core, readout, regularization as reg
 
 
 schema = dj.schema('aecker_mesonet_parameters', locals())
 
 
 @schema
-class Core(p.Core, dj.Lookup):
+class Core(core.Core, dj.Lookup):
 
-    class ThreeLayerConv2d(p.StackedConv2d, dj.Part):
+    class ThreeLayerConv2d(core.StackedConv2d, dj.Part):
         _num_layers = 3
         _conv_smooth_min = [0.001]
         _conv_smooth_max = [0.01]
@@ -40,9 +39,9 @@ class Core(p.Core, dj.Lookup):
 
 
 @schema
-class Readout(p.Readout, dj.Lookup):
+class Readout(readout.Readout, dj.Lookup):
 
-    class SpatialXFeatureJointL1(p.SpatialXFeatureJointL1, dj.Part):
+    class SpatialXFeatureJointL1(readout.SpatialXFeatureJointL1, dj.Part):
         _readout_sparsity_min = [0.01]
         _readout_sparsity_max = [0.04]
         _positive_feature_weights = [False, True]
@@ -54,15 +53,22 @@ class Readout(p.Readout, dj.Lookup):
 
 
 @schema
-@p.regularizable([Core, Readout])
-class Model(p.RegularizableModel, dj.Lookup):
-    definition="""
-        -> Core
-        -> Readout
-        ---
-        num_models : integer # number of regularization parameter combinations to try
-    """
+class Model(model.Model, dj.Lookup):
 
-    # TODO: Store contents here or make function that inserts model combinations
-    #       (currently needs to be done by hand)
+    class CorePlusReadout(model.CorePlusReadout, dj.Part):
+        _core_table = Core
+        _readout_table = Readout
+        _reg_path_generator = lambda self, seed, reg_params: reg.random_search(seed, reg_params, num_models=32)
+
+        @property
+        def content(self):
+            for core_key, readout_key in product(Core.ThreeLayerConv2d().fetch(dj.key),
+                                                 Readout.SpatialXFeatureJointL1().fetch(dj.key)):
+                yield(dict(core_key, **readout_key))
+
+
+@schema
+@reg.regularizable([Core, Readout])
+class RegPath(reg.RegPath, dj.Computed):
+    _model_table = Model
 
