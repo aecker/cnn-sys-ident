@@ -117,13 +117,12 @@ class RegPath(Messager):
             if isclass(getattr(self, member)) and issubclass(getattr(self, member), dj.Part):
                 yield getattr(self, member)
 
-    def build_model(self, key, data):
-        print('NEED TO DEAL WITH TF GRAPH (e.g. in Base)')
+    def build_model(self, key, base):
         reg_params = dict()
         for part in self.parts:
             p = (part() & key).fetch1()
             reg_params = dict(reg_params, **p)
-        self._model_table().build(key, data, reg_params)
+        return self._model_table().build(key, base, reg_params)
 
     def _make_tuples(self, key):
         model = self._model_table().instance(key)

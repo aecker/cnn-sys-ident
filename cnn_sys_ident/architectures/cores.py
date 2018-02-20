@@ -48,33 +48,36 @@ class StackedConv2dCore:
                  rel_sparse_weight=[0, 1],
                  conv_smooth_weight=0.001,
                  conv_sparse_weight=0.001,
+                 scope='core',
+                 reuse=False,
                  **kwargs):
-        with tf.variable_scope('core'):
-            self.conv = []
-            self.weights = []
-            x = inputs
-            for i, (fs, nf, st, rt, pd, fn, sm, sp) in enumerate(
-                zip(filter_size, num_filters, stride, rate, padding,
-                    activation_fn, rel_smooth_weight, rel_sparse_weight)):
-                bn_params = {'decay': 0.98, 'is_training': base.is_training}
-                scope = 'conv{}'.format(i)
-                reg = lambda w: smoothness_regularizer_2d(w, conv_smooth_weight * sm) + \
-                                group_sparsity_regularizer_2d(w, conv_sparse_weight * sp)
-                x = layers.convolution2d(inputs=x,
-                                         num_outputs=int(nf),
-                                         kernel_size=int(fs),
-                                         stride=int(st),
-                                         rate=int(rt),
-                                         padding=pd,
-                                         activation_fn=ACTIVATION_FN[fn],
-                                         normalizer_fn=layers.batch_norm,
-                                         normalizer_params=bn_params,
-                                         weights_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.01),
-                                         weights_regularizer=reg,
-                                         scope=scope)
-                with tf.variable_scope(scope, reuse=True):
-                    weights = tf.get_variable('weights')
-                self.weights.append(weights)
-                self.conv.append(x)
+        with base.tf_session.graph.as_default():
+            with tf.variable_scope(scope, reuse=reuse):
+                self.conv = []
+                self.weights = []
+                x = inputs
+                for i, (fs, nf, st, rt, pd, fn, sm, sp) in enumerate(
+                    zip(filter_size, num_filters, stride, rate, padding,
+                        activation_fn, rel_smooth_weight, rel_sparse_weight)):
+                    bn_params = {'decay': 0.98, 'is_training': base.is_training}
+                    scope = 'conv{}'.format(i)
+                    reg = lambda w: smoothness_regularizer_2d(w, conv_smooth_weight * sm) + \
+                                    group_sparsity_regularizer_2d(w, conv_sparse_weight * sp)
+                    x = layers.convolution2d(inputs=x,
+                                             num_outputs=int(nf),
+                                             kernel_size=int(fs),
+                                             stride=int(st),
+                                             rate=int(rt),
+                                             padding=pd,
+                                             activation_fn=ACTIVATION_FN[fn],
+                                             normalizer_fn=layers.batch_norm,
+                                             normalizer_params=bn_params,
+                                             weights_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.01),
+                                             weights_regularizer=reg,
+                                             scope=scope)
+                    with tf.variable_scope(scope, reuse=True):
+                        weights = tf.get_variable('weights')
+                    self.weights.append(weights)
+                    self.conv.append(x)
 
-            self.output = tf.identity(self.conv[-1], name='output')
+                self.output = tf.identity(self.conv[-1], name='output')

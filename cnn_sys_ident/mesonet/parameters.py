@@ -1,8 +1,8 @@
 import datajoint as dj
 from itertools import product
 
-from ..database import model, core, readout, regularization as reg
-
+from ..database import model, core, readout, regularization as reg, fit
+from .data import MultiDataset
 
 schema = dj.schema('aecker_mesonet_parameters', locals())
 
@@ -72,3 +72,9 @@ class Model(model.Model, dj.Lookup):
 class RegPath(reg.RegPath, dj.Computed):
     _model_table = Model
 
+
+@schema
+class Fit(fit.Fit, dj.Computed):
+    _reg_path_table = RegPath
+    _data_table = MultiDataset
+    

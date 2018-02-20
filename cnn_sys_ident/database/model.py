@@ -1,3 +1,5 @@
+import datajoint as dj
+
 from cnn_sys_ident import architectures
 from ..architectures import models, cores, readouts
 from .config import Config
@@ -8,11 +10,11 @@ class Model(Config):
     
     _type = 'model'
 
-    def build(self, key, data, regularization_parameters):
+    def build(self, key, base, regularization_parameters):
         type_name = self._type + '_type'
         the_type = (self & key).fetch1(type_name)
         part = getattr(self, the_type)
-        return part().build(key, data, regularization_parameters)
+        return part().build(key, base, regularization_parameters)
 
 
 class Component(Config):
@@ -56,21 +58,6 @@ class ComponentPart:
             'Subclasses have to implement this property to fill the database!')
 
 
-# TODO: Remove (dummies)
-class Data:
-    num_neurons = 10
-    def train(self):
-        return None, np.ones([100, 10])
-
-import tensorflow as tf
-class BaseModel:
-    is_training = tf.constant(False)
-    inputs = tf.constant([100, 20, 20, 1])
-    
-    def __init__(self, data):
-        self.data = data
-
-
 class CorePlusReadout:
     _core_table = None
     _readout_table = None
@@ -84,10 +71,9 @@ class CorePlusReadout:
             -> {readout}
         """.format(core=self._core_table.__name__, readout=self._readout_table.__name__)
 
-    def build(self, key, data, regularization_parameters):
-        base = BaseModel(data)
+    def build(self, key, base, regularization_parameters):
         core_key = (self * self._core_table() & key).fetch1(dj.key)
         core = self._core_table().build(core_key, base, base.inputs, regularization_parameters)
         readout_key = (self * self._readout_table() & key).fetch1(dj.key)
         readout = self._readout_table().build(readout_key, base, core.output, regularization_parameters)
-        return CorePlusReadoutModel(base, core, readout)
+        return models.CorePlusReadoutModel(base, core, readout)
