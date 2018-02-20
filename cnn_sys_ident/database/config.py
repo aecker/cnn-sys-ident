@@ -29,7 +29,7 @@ class Config(Messager):
         return """
         # parameters for {cn}
 
-        {ct}_hash                   : varchar(256) # unique identifier for configuration 
+        {ct}_hash                   : char(32)     # unique identifier for configuration 
         ---
         {ct}_type                   : varchar(50)  # type
         {ct}_ts=CURRENT_TIMESTAMP   : timestamp    # automatic

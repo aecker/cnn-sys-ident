@@ -191,7 +191,7 @@ class Area(dj.Lookup):
 @schema
 class MultiDataset(dj.Lookup):
     definition = """  # Dataset consisting of multiple scans and brain areas/layers
-        data_hash   : varchar(256) # unique identifier for dataset
+        data_hash   : char(32) # unique identifier for dataset
         ---
         restriction : varchar(255) # description
         """
