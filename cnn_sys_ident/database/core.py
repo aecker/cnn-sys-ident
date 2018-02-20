@@ -60,6 +60,7 @@ class StackedConv2d(Stacked):
 
 
 class StackedRotEquiConv2d(Stacked):
+    _regularization_parameters = ['conv_smooth_weight', 'conv_sparse_weight']
     _parameters = OrderedDict([
         ('num_rotations',     'tinyint               # number of rotations'),
     ])
