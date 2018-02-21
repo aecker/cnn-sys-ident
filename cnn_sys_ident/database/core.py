@@ -75,3 +75,7 @@ class StackedRotEquiConv2d(Stacked):
         ('rel_sparse_weight', 'float                 # relative weight for sparseness regularizer'),
     ])
 
+    @property
+    def class_name(self):
+        return 'StackedRotEquiConv2d'
+

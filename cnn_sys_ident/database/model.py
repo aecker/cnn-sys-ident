@@ -36,7 +36,7 @@ class Component(Config):
         module = getattr(architectures, self._type + 's')
         assert hasattr(module, class_name), (
             '''Cannot find {t} for {name}. '''
-            '''It needs to be named "{name}{T} in architectures.{config_type}s'''.format(
+            '''It needs to be named "{name}{T} in architectures.{t}s'''.format(
                 t=self._type, T=self._type.title(), name=class_name))
         the_class = getattr(module, class_name)
         return the_class(base, inputs, **parameters, **regularization_parameters)

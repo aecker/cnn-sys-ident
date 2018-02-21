@@ -120,8 +120,9 @@ class RegPath(Messager):
     def build_model(self, key, base):
         reg_params = dict()
         for part in self.parts:
-            p = (part() & key).fetch1()
-            reg_params = dict(reg_params, **p)
+            if len(part() & key):
+                p = (part() & key).fetch1()
+                reg_params = dict(reg_params, **p)
         return self._model_table().build(key, base, reg_params)
 
     def _make_tuples(self, key):

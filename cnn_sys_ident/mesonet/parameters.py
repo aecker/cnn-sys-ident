@@ -40,11 +40,11 @@ class Core(core.Core, dj.Lookup):
 
     class ThreeLayerRotEquiConv2d(core.StackedRotEquiConv2d, dj.Part):
         _num_layers = 3
-        _num_rotations = [8]
         _conv_smooth_min = [0.001]
         _conv_smooth_max = [0.03]
         _conv_sparse_min = [0.001]
         _conv_sparse_max = [0.1]
+        _num_rotations = [8]
         _filter_size = [[13, 5, 5]]
         _num_filters = [
             [8, 16, 32],
@@ -59,8 +59,8 @@ class Core(core.Core, dj.Lookup):
 
         @property
         def content(self):
-            for p in product(self._num_rotations, self._conv_smooth_min, self._conv_smooth_max,
-                             self._conv_sparse_min, self._conv_sparse_max, self._filter_size,
+            for p in product(self._conv_smooth_min, self._conv_smooth_max, self._conv_sparse_min,
+                             self._conv_sparse_max, self._num_rotations, self._filter_size,
                              self._num_filters, self._stride, self._rate, self._padding,
                              self._activation_fn, self._rel_smooth_weight, self._rel_sparse_weight):
                 yield self.encode_params_for_db(dict(zip(self.parameter_names, p)))

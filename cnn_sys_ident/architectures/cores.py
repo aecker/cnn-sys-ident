@@ -127,8 +127,11 @@ class StackedRotEquiConv2dCore:
                                         group_sparsity_regularizer_2d(w, conv_sparse_weight * sp)
                         reg(weights_all_rotations)
 
-                        conv = tf.nn.conv2d(conv, weights_all_rotations, strides=[1, st, st, 1],
-                                            dilations=[1, rt, rt, 1], padding=pd)
+                        # conv = tf.nn.conv2d(conv, weights_all_rotations, strides=[1, st, st, 1],
+                        #                     dilations=[1, rt, rt, 1], padding=pd)
+                        assert rt == 1, 'Dilation not supported. Need to upgrade to TF 1.5'
+                        conv = tf.nn.conv2d(conv, weights_all_rotations,
+                                            strides=[1, st, st, 1], padding=pd)
                         enable_scale = i < len(filter_size) - 1
                         conv = layers.batch_norm(conv, center=True, scale=enable_scale, decay=0.95,
                                                  is_training=base.is_training, fused=fused_bn)
