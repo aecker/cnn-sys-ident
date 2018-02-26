@@ -25,7 +25,8 @@ class SpatialXFeatureJointL1Readout:
                 if init_masks == 'sta':
                     images_train, responses_train = data.train()
                     k = (images_train.shape[1] - num_px_y) // 2
-                    mask_init = sta_init(images_train, responses_train)[:,k:-k,k:-k]
+                    mask_init = sta_init(images_train, responses_train,
+                                         max_val=0.01, sd=0.001)[:,k:-k,k:-k]
                     mask_init = tf.constant_initializer(mask_init)
                 else:
                     mask_init = tf.truncated_normal_initializer(mean=0.0, stddev=0.01)
@@ -102,7 +103,7 @@ class SpatialSparseXFeatureDenseReadout:
                 self.h = tf.reduce_sum(self.masked * tf.transpose(self.feature_weights), 1)
 
                 # L1 regularization for masks, L2 for feature weights
-                self.readout_reg = readout_sparsity * tf.reduce_sum(
+                self.readout_reg = mask_sparsity * tf.reduce_sum(
                     tf.reduce_sum(tf.abs(self.masks), [1, 2]) * \
                     tf.sqrt(tf.reduce_sum(tf.square(self.feature_weights), 1)))
                 tf.losses.add_loss(self.readout_reg, tf.GraphKeys.REGULARIZATION_LOSSES)

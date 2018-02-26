@@ -33,7 +33,6 @@ class Trainer:
             not_improved = 0
             iter_num = 0
             self.session.run(tf.global_variables_initializer())
-            #self.base.tf_session.load()
             for _ in range(3):
                 while iter_num < max_iter:
 
