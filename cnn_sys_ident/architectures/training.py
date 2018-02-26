@@ -33,6 +33,7 @@ class Trainer:
             not_improved = 0
             iter_num = 0
             self.session.run(tf.global_variables_initializer())
+            #self.base.tf_session.load()
             for _ in range(3):
                 while iter_num < max_iter:
 
@@ -67,15 +68,16 @@ class Trainer:
                 learning_rate /= np.sqrt(10)
                 print('Reducing learning rate to {:f}'.format(learning_rate))
 
-        test_corr = self.compute_test_corr()
+            test_corr = self.compute_test_corr()
         return iter_num, val_loss, test_corr
 
     def compute_test_corr(self):
-        inputs, responses = self.data.test()
-        feed_dict = {self.base.inputs: inputs,
-                     self.base.responses: responses,
-                     self.base.is_training: False}
-        predictions = self.session.run(self.model.predictions, feed_dict)
+        with self.graph.as_default():
+            inputs, responses = self.data.test()
+            feed_dict = {self.base.inputs: inputs,
+                         self.base.responses: responses,
+                         self.base.is_training: False}
+            predictions = self.session.run(self.model.predictions, feed_dict)
         rho = np.zeros(self.data.num_neurons)
         for i, (res, pred) in enumerate(zip(responses.T, predictions.T)):
             if np.std(res) > 1e-5 and np.std(pred) > 1e-5:

@@ -44,7 +44,8 @@ class Dataset:
         self.px_x = images_train.shape[2]
         self.px_y = images_train.shape[1]
         self.input_shape = [None, self.px_y, self.px_x, 1]
-        self.next_epoch()
+        self.minibatch_idx = 1e10
+        self.train_perm = []
 
     def val(self):
         return self.images_val, self.responses_val

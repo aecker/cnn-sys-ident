@@ -1,5 +1,6 @@
 import numpy as np
 import tensorflow as tf
+from scipy import signal
 
 
 def soft_threshold(x):
@@ -36,3 +37,23 @@ def rotate_weights(weights, num_rotations, first_layer=False):
         weights_rotated.append(w)
     weights_all_rotations = tf.concat(weights_rotated, axis=3, name='weights_all_rotations')
     return weights_all_rotations
+
+
+def envelope(w, k=51):
+    t = np.linspace(-2.5, 2.5, k, endpoint=True)
+    u, v = np.meshgrid(t, t)
+    win = np.exp(-(u ** 2 + v ** 2) / 2) / k**2
+    sub = lambda x: x - np.mean(x)
+    return np.array([signal.convolve2d(sub(wi) ** 2, win, 'same') for wi in w])
+
+
+def sta_init(x, y, k=51, alpha=10, max_val=0.1, sd=0.01):
+    x = x[:,:,:,0]
+    x = (x - x.mean()) / x.std()
+    y = (y - y.mean(axis=0)) / y.std(axis=0)
+    w = np.tensordot(y, x, axes=[[0], [0]])
+    e = envelope(w, k)
+    e = (e / np.max(e, axis=(1, 2), keepdims=True)) ** alpha
+    e *= max_val
+    e += np.random.normal(size=e.shape) * sd
+    return e

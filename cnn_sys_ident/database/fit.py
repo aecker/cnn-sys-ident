@@ -2,6 +2,7 @@ import datajoint as dj
 
 from ..architectures.training import Trainer
 from ..architectures.models import TFSession, BaseModel
+from ..utils.data import key_hash
 
 
 class Fit:
@@ -21,12 +22,16 @@ class Fit:
                    dataset=self._data_table.__name__)
 
     def _make_tuples(self, key):
-        tf_session = TFSession(log_dir='checkpoints', log_hash=key['model_hash'])
-        data = (self._data_table() & key).load_data()
-        base = BaseModel(tf_session, data)
-        model = self._reg_path_table().build_model(key, base)
-        trainer = Trainer(base, model)
+        model = self.get_model(key)
+        trainer = Trainer(model.base, model)
         tupl = key
         tupl['num_iterations'], tupl['val_loss'], tupl['test_corr'] = trainer.fit()
         self.insert1(tupl)
+
+    def get_model(self, key):
+        log_hash = key_hash(key)
+        data = (self._data_table() & key).load_data()
+        base = BaseModel(data, log_dir='checkpoints', log_hash=log_hash)
+        model = self._reg_path_table().build_model(key, base)
+        return model
 

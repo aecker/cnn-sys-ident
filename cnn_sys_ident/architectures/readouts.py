@@ -2,7 +2,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.contrib import layers
 
-from .utils import soft_threshold, inv_soft_threshold
+from .utils import soft_threshold, inv_soft_threshold, sta_init
 
 
 class SpatialXFeatureJointL1Readout:
@@ -11,6 +11,7 @@ class SpatialXFeatureJointL1Readout:
                  inputs,
                  positive_feature_weights=False,
                  readout_sparsity=0.02,
+                 init_masks='sta',
                  scope='readout',
                  reuse=False,
                  **kwargs):
@@ -21,10 +22,17 @@ class SpatialXFeatureJointL1Readout:
                 num_neurons = data.num_neurons
 
                 # masks
+                if init_masks == 'sta':
+                    images_train, responses_train = data.train()
+                    k = (images_train.shape[1] - num_px_y) // 2
+                    mask_init = sta_init(images_train, responses_train)[:,k:-k,k:-k]
+                    mask_init = tf.constant_initializer(mask_init)
+                else:
+                    mask_init = tf.truncated_normal_initializer(mean=0.0, stddev=0.01)
                 self.masks = tf.get_variable(
                     'masks',
                     shape=[num_neurons, num_px_y, num_px_x],
-                    initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.01))
+                    initializer=mask_init)
                 self.masks = tf.abs(self.masks, name='positive_masks')
                 self.masked = tf.tensordot(inputs, self.masks, [[1, 2], [1, 2]], name='masked')
 
