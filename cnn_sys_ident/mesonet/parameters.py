@@ -79,6 +79,18 @@ class Readout(readout.Readout, dj.Lookup):
             for p in product(self._readout_sparsity_min, self._readout_sparsity_max, self._positive_feature_weights):
                 yield(dict(zip(self.parameter_names, p)))
 
+    class SpatialSparseXFeatureDense(readout.SpatialSparseXFeatureDense, dj.Part):
+        _mask_sparsity_min = [0.01]
+        _mask_sparsity_max = [0.04]
+        _positive_feature_weights = [False]
+        _init_masks = ['rand']
+
+        @property
+        def content(self):
+            for p in product(self._mask_sparsity_min, self._mask_sparsity_max,
+                             self._positive_feature_weights, self._init_masks):
+                yield(dict(zip(self.parameter_names, p)))
+
 
 @schema
 class Model(model.Model, dj.Lookup):
@@ -90,11 +102,17 @@ class Model(model.Model, dj.Lookup):
 
         @property
         def content(self):
-            for core_key, readout_key in product(Core.ThreeLayerConv2d().fetch(dj.key),
-                                                 Readout.SpatialXFeatureJointL1().fetch(dj.key)):
+            for core_key, readout_key in product(
+                    Core.ThreeLayerConv2d().fetch(dj.key),
+                    Readout.SpatialXFeatureJointL1().fetch(dj.key)):
                 yield(dict(core_key, **readout_key))
-            for core_key, readout_key in product(Core.ThreeLayerRotEquiConv2d().fetch(dj.key),
-                                                 Readout.SpatialXFeatureJointL1().fetch(dj.key)):
+            for core_key, readout_key in product(
+                    Core.ThreeLayerRotEquiConv2d().fetch(dj.key),
+                    Readout.SpatialXFeatureJointL1().fetch(dj.key)):
+                yield(dict(core_key, **readout_key))
+            for core_key, readout_key in product(
+                    Core.ThreeLayerRotEquiConv2d().fetch(dj.key),
+                    Readout.SpatialSparseXFeatureDense().fetch(dj.key)):
                 yield(dict(core_key, **readout_key))
 
 
