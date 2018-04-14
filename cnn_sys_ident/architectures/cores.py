@@ -1,7 +1,10 @@
 import tensorflow as tf
 from tensorflow.contrib import layers
+import numpy as np
 
-from .utils import soft_threshold, rotate_weights
+from .utils import soft_threshold, rotate_weights, rotate_weights_hermite, \
+    downsample_weights
+from ..utils.hermite import hermite_2d
 
 
 ACTIVATION_FN = {
@@ -91,8 +94,8 @@ class StackedRotEquiConv2dCore:
                  filter_size=[13, 5, 5],
                  num_filters=[8, 16, 32],
                  num_rotations=8,
-                 stride=[1, 1],
-                 rate=[1, 1],
+                 stride=[1, 1, 1],
+                 rate=[1, 1, 1],
                  padding=['VALID', 'VALID', 'VALID'],
                  activation_fn=['soft', 'soft', 'soft'],
                  rel_smooth_weight=[1, 0, 0],
@@ -120,6 +123,76 @@ class StackedRotEquiConv2dCore:
                             initializer=tf.truncated_normal_initializer(stddev=0.1))
                         self.weights.append(weights)
                         weights_all_rotations = rotate_weights(weights, num_rotations, first_layer=(not i))
+                        self.weights_all.append(weights_all_rotations)
+
+                        # apply regularization to all rotated versions
+                        reg = lambda w: smoothness_regularizer_2d(w, conv_smooth_weight * sm) + \
+                                        group_sparsity_regularizer_2d(w, conv_sparse_weight * sp)
+                        reg(weights_all_rotations)
+
+                        # conv = tf.nn.conv2d(conv, weights_all_rotations, strides=[1, st, st, 1],
+                        #                     dilations=[1, rt, rt, 1], padding=pd)
+                        assert rt == 1, 'Dilation not supported. Need to upgrade to TF 1.5'
+                        conv = tf.nn.conv2d(conv, weights_all_rotations,
+                                            strides=[1, st, st, 1], padding=pd)
+                        enable_scale = i < len(filter_size) - 1
+                        conv = layers.batch_norm(conv, center=True, scale=enable_scale, decay=0.95,
+                                                 is_training=base.is_training, fused=fused_bn)
+                        if fn is not None:
+                            conv = ACTIVATION_FN[fn](conv)
+                        self.conv.append(conv)
+                        nf_in = nf_out * num_rotations
+
+                self.output = tf.identity(self.conv[-1], name='output')
+
+
+class StackedRotEquiHermiteConv2dCore:
+    def __init__(self,
+                 base,
+                 inputs,
+                 num_rotations=8,
+                 upsampling=2,
+                 filter_size=[13, 5, 5],
+                 num_filters=[8, 16, 32],
+                 stride=[1, 1, 1],
+                 rate=[1, 1, 1],
+                 padding=['VALID', 'VALID', 'VALID'],
+                 activation_fn=['soft', 'soft', 'soft'],
+                 rel_smooth_weight=[1, 0, 0],
+                 rel_sparse_weight=[0, 1, 1],
+                 conv_smooth_weight=0.001,
+                 conv_sparse_weight=0.001,
+                 scope='core',
+                 reuse=False,
+                 fused_bn=True,
+                 **kwargs):
+        with base.tf_session.graph.as_default():
+            with tf.variable_scope(scope, reuse=reuse):
+                conv = inputs
+                self.conv = []
+                self.weights = []
+                self.weights_all = []
+                nf_in = 1
+                for i, (fs, nf_out, st, rt, pd, fn, sm, sp) in enumerate(
+                    zip(filter_size, num_filters, stride, rate, padding,
+                        activation_fn, rel_smooth_weight, rel_sparse_weight)):
+                    with tf.variable_scope('conv{:d}'.format(i+1)):
+                        H, desc, mu = hermite_2d(fs, fs*upsampling, 2*np.sqrt(fs))
+                        H = tf.constant(H, dtype=tf.float32, name='hermite_basis')
+                        n_coeffs = fs * (fs + 1) // 2
+                        coeffs = tf.get_variable(
+                            'coeffs',
+                            shape=[n_coeffs, nf_in, nf_out],
+                            initializer=tf.truncated_normal_initializer(stddev=0.1))
+                        weights = tf.tensordot(H, coeffs, axes=[[0], [0]])
+                        weights = tf.identity(downsample_weights(weights, upsampling),
+                                              name='weights')
+                        self.weights.append(weights)
+                        weights_all_rotations = rotate_weights_hermite(
+                            H, desc, mu, coeffs, num_rotations, first_layer=(not i))
+                        weights_all_rotations = tf.identity(
+                            downsample_weights(weights_all_rotations, upsampling),
+                            name='weights_all_rotations')
                         self.weights_all.append(weights_all_rotations)
 
                         # apply regularization to all rotated versions

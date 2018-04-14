@@ -1,6 +1,7 @@
 import numpy as np
 import tensorflow as tf
 from scipy import signal
+from ..utils.hermite import rotation_matrix
 
 
 def soft_threshold(x):
@@ -37,6 +38,34 @@ def rotate_weights(weights, num_rotations, first_layer=False):
         weights_rotated.append(w)
     weights_all_rotations = tf.concat(weights_rotated, axis=3, name='weights_all_rotations')
     return weights_all_rotations
+
+
+def rotate_weights_hermite(H, desc, mu, coeffs, num_rotations, first_layer=False):
+    num_coeffs, num_inputs_total, num_outputs = coeffs.shape.as_list()
+    filter_size = int(H.shape[1])
+    num_inputs = num_inputs_total // num_rotations
+    weights_rotated = []
+    for i in range(num_rotations):
+        angle = i * 2 * np.pi / num_rotations
+        R = rotation_matrix(desc, mu, angle)
+        R = tf.constant(R, dtype=tf.float32, name='R')
+        coeffs_rotated = tf.tensordot(R, coeffs, axes=[[1], [0]])
+        w = tf.tensordot(H, coeffs_rotated, axes=[[0], [0]],
+                         name='weights_rotated_{}'.format(i))
+        if i and not first_layer:
+            shift = num_inputs_total - i * num_inputs
+            w = tf.concat([w[:,:,shift:,:], w[:,:,:shift,:]], axis=2)
+        weights_rotated.append(w)
+    weights_all_rotations = tf.concat(weights_rotated, axis=3)
+    return weights_all_rotations
+
+
+def downsample_weights(weights, factor=2):
+    w = 0
+    for i in range(factor):
+        for j in range(factor):
+            w += weights[i::factor,j::factor]
+    return w
 
 
 def envelope(w, k=51):

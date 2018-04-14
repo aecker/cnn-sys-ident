@@ -1,7 +1,7 @@
 import datajoint as dj
 
 from ..architectures.training import Trainer
-from ..architectures.models import TFSession, BaseModel
+from ..architectures.models import BaseModel
 from ..utils.data import key_hash
 
 
@@ -29,9 +29,14 @@ class Fit:
         self.insert1(tupl)
 
     def get_model(self, key):
+        key = (self.key_source & key).fetch1(dj.key)
         log_hash = key_hash(key)
         data = (self._data_table() & key).load_data()
         base = BaseModel(data, log_dir='checkpoints', log_hash=log_hash)
         model = self._reg_path_table().build_model(key, base)
         return model
 
+    def load_model(self, key):
+        model = self.get_model(key)
+        model.base.tf_session.load()
+        return model

@@ -55,6 +55,9 @@ class BaseModel:
             self.inputs = tf.placeholder(tf.float32, shape=data.input_shape, name='inputs')
             self.responses = tf.placeholder(tf.float32, shape=[None, data.num_neurons], name='responses')
 
+    def evaluate(self, var, *args, **kwargs):
+        return self.tf_session.session.run(var, *args, **kwargs)
+
 
 class CorePlusReadoutModel:
     def __init__(self, base, core, readout):

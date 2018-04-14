@@ -18,7 +18,8 @@ class Trainer:
             self.poisson = poisson(model.predictions, base.responses)
             self.reg_loss = tf.losses.get_regularization_loss()
             self.total_loss = self.poisson + self.reg_loss
-            self.train_step = tf.train.AdamOptimizer(self.learning_rate).minimize(self.total_loss)
+            self.train_step = tf.train.AdamOptimizer(
+                self.learning_rate).minimize(self.total_loss)
 
     def fit(self,
             max_iter=10000,
