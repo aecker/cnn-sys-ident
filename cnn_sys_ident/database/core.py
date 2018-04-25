@@ -79,3 +79,25 @@ class StackedRotEquiConv2d(Stacked):
     def class_name(self):
         return 'StackedRotEquiConv2d'
 
+
+class StackedRotEquiHermiteConv2d(Stacked):
+    _regularization_parameters = ['conv_smooth_weight', 'conv_sparse_weight']
+    _parameters = OrderedDict([
+        ('num_rotations',     'tinyint               # number of rotations'),
+        ('upsampling',        'tinyint               # upsampling factor for filters'),
+    ])
+    _stacked_parameters = OrderedDict([
+        ('filter_size',       'tinyint               # filter size'),
+        ('num_filters',       'smallint              # number of filters'),
+        ('stride',            'tinyint               # stride for filters'),
+        ('rate',              'tinyint               # rate for dilated filters'),
+        ('padding',           'enum("SAME", "VALID") # type of padding'),
+        ('activation_fn',     'enum("none", "relu", "elu", "soft") # activation function'),
+        ('rel_smooth_weight', 'float                 # relative weight for smoothness regularizer'),
+        ('rel_sparse_weight', 'float                 # relative weight for sparseness regularizer'),
+    ])
+
+    @property
+    def class_name(self):
+        return 'StackedRotEquiHermiteConv2d'
+

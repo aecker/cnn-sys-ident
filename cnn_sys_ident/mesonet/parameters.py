@@ -44,11 +44,12 @@ class Core(core.Core, dj.Lookup):
         _conv_smooth_max = [0.03]
         _conv_sparse_min = [0.001]
         _conv_sparse_max = [0.1]
-        _num_rotations = [8]
+        _num_rotations = [8, 12]
         _filter_size = [[13, 5, 5]]
         _num_filters = [
             [8, 16, 32],
             [32, 32, 32],
+            [16, 16, 16],
         ]
         _stride = [[1, 1, 1]]
         _rate = [[1, 1, 1]]
@@ -59,10 +60,44 @@ class Core(core.Core, dj.Lookup):
 
         @property
         def content(self):
-            for p in product(self._conv_smooth_min, self._conv_smooth_max, self._conv_sparse_min,
-                             self._conv_sparse_max, self._num_rotations, self._filter_size,
-                             self._num_filters, self._stride, self._rate, self._padding,
-                             self._activation_fn, self._rel_smooth_weight, self._rel_sparse_weight):
+            for p in product(self._conv_smooth_min, self._conv_smooth_max,
+                             self._conv_sparse_min, self._conv_sparse_max,
+                             self._num_rotations, self._filter_size,
+                             self._num_filters, self._stride, self._rate,
+                             self._padding, self._activation_fn,
+                             self._rel_smooth_weight, self._rel_sparse_weight):
+                yield self.encode_params_for_db(dict(zip(self.parameter_names, p)))
+
+
+    class ThreeLayerRotEquiHermiteConv2d(core.StackedRotEquiHermiteConv2d, dj.Part):
+        _num_layers = 3
+        _conv_smooth_min = [0.001]
+        _conv_smooth_max = [0.03]
+        _conv_sparse_min = [0.001]
+        _conv_sparse_max = [0.1]
+        _num_rotations = [8]
+        _upsampling = [2]
+        _filter_size = [[13, 5, 5]]
+        _num_filters = [
+            [8, 16, 32],
+            [16, 16, 16],
+        ]
+        _stride = [[1, 1, 1]]
+        _rate = [[1, 1, 1]]
+        _padding = [['VALID', 'VALID', 'VALID']]
+        _activation_fn= [['soft', 'soft', 'soft']]
+        _rel_smooth_weight = [[1, 0, 0]]
+        _rel_sparse_weight = [[0, 1, 1]]
+
+        @property
+        def content(self):
+            for p in product(self._conv_smooth_min, self._conv_smooth_max,
+                             self._conv_sparse_min, self._conv_sparse_max,
+                             self._num_rotations, self._upsampling,
+                             self._filter_size, self._num_filters,
+                             self._stride, self._rate,
+                             self._padding, self._activation_fn,
+                             self._rel_smooth_weight, self._rel_sparse_weight):
                 yield self.encode_params_for_db(dict(zip(self.parameter_names, p)))
 
 
@@ -85,7 +120,7 @@ class Readout(readout.Readout, dj.Lookup):
         _mask_sparsity_min = [0.01]
         _mask_sparsity_max = [0.04]
         _positive_feature_weights = [False]
-        _init_masks = ['sta']
+        _init_masks = ['sta', 'rand']
 
         @property
         def content(self):
@@ -114,6 +149,14 @@ class Model(model.Model, dj.Lookup):
                 yield(dict(core_key, **readout_key))
             for core_key, readout_key in product(
                     Core.ThreeLayerRotEquiConv2d().fetch(dj.key),
+                    Readout.SpatialSparseXFeatureDense().fetch(dj.key)):
+                yield(dict(core_key, **readout_key))
+            for core_key, readout_key in product(
+                    Core.ThreeLayerRotEquiHermiteConv2d().fetch(dj.key),
+                    Readout.SpatialXFeatureJointL1().fetch(dj.key)):
+                yield(dict(core_key, **readout_key))
+            for core_key, readout_key in product(
+                    Core.ThreeLayerRotEquiHermiteConv2d().fetch(dj.key),
                     Readout.SpatialSparseXFeatureDense().fetch(dj.key)):
                 yield(dict(core_key, **readout_key))
 

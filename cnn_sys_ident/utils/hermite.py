@@ -77,8 +77,8 @@ def rotation_matrix(desc, mu, angle):
     R = np.zeros((len(desc), len(desc)))
     for i, (d, m) in enumerate(zip(desc, mu)):
         if d == 'r':
-            Rc = np.array([[np.cos(m*angle), -np.sin(m*angle)],
-                           [np.sin(m*angle), np.cos(m*angle)]])
+            Rc = np.array([[np.cos(m*angle), np.sin(m*angle)],
+                           [-np.sin(m*angle), np.cos(m*angle)]])
             R[i:i+2,i:i+2] = Rc
         elif d == 'z':
             R[i,i] = 1
