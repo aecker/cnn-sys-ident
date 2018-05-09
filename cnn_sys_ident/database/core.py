@@ -85,6 +85,7 @@ class StackedRotEquiHermiteConv2d(Stacked):
     _parameters = OrderedDict([
         ('num_rotations',     'tinyint               # number of rotations'),
         ('upsampling',        'tinyint               # upsampling factor for filters'),
+        ('shared_biases',     'boolean               # share biases across rotations'),
     ])
     _stacked_parameters = OrderedDict([
         ('filter_size',       'tinyint               # filter size'),
