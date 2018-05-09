@@ -216,6 +216,7 @@ class MultiDataset(dj.Lookup):
             """
 
     def make_groups(self):
+        Area().fill()
         restrictions = [
             'animal_id=11521 and brain_area="V1"',
             'animal_id=11521 and brain_area="V1" and scan_idx=1 and area_id=1',

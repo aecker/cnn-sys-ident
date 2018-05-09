@@ -34,7 +34,7 @@ class Trainer:
             not_improved = 0
             iter_num = 0
             self.session.run(tf.global_variables_initializer())
-            for _ in range(3):
+            for _ in range(2):
                 while iter_num < max_iter:
 
                     # training step
@@ -65,7 +65,7 @@ class Trainer:
                             not_improved = 0
                             break
 
-                learning_rate /= np.sqrt(10)
+                learning_rate /= 10
                 print('Reducing learning rate to {:f}'.format(learning_rate))
 
             test_corr = self.compute_test_corr()

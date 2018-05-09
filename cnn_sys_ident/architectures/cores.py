@@ -23,15 +23,17 @@ def smoothness_regularizer_2d(W, weight=1.0):
         W_lap = tf.nn.depthwise_conv2d(tf.transpose(W, perm=[3, 0, 1, 2]),
                                        tf.tile(lap, [1, 1, num_filters, 1]),
                                        strides=[1, 1, 1, 1], padding='SAME')
-        penalty = tf.reduce_sum(tf.reduce_sum(tf.square(W_lap), [1, 2, 3]) / tf.reduce_sum(tf.square(W), [0, 1, 2]))
+        penalty = tf.reduce_sum(tf.reduce_sum(tf.square(W_lap), [1, 2, 3]) / \
+                                (1e-8 + tf.reduce_sum(tf.square(W), [0, 1, 2])))
         penalty = tf.identity(weight * penalty, name='penalty')
         tf.add_to_collection('smoothness_regularizer_2d', penalty)
         return penalty
 
-
 def group_sparsity_regularizer_2d(W, weight=1.0):
     with tf.variable_scope('group_sparsity'):
-        penalty = tf.reduce_sum(tf.sqrt(tf.reduce_sum(tf.square(W), [0, 1])))
+        penalty = tf.reduce_sum(
+            tf.reduce_sum(tf.sqrt(tf.reduce_sum(tf.square(W), [0, 1])), 0) / \
+            tf.sqrt(1e-8 + tf.reduce_sum(tf.square(W), [0, 1, 2])))
         penalty = tf.identity(weight * penalty, name='penalty')
         tf.add_to_collection('group_sparsity_regularizer_2d', penalty)
         return penalty
@@ -94,6 +96,7 @@ class StackedRotEquiConv2dCore:
                  filter_size=[13, 5, 5],
                  num_filters=[8, 16, 32],
                  num_rotations=8,
+                 shared_biases=True,
                  stride=[1, 1, 1],
                  rate=[1, 1, 1],
                  padding=['VALID', 'VALID', 'VALID'],
@@ -126,19 +129,32 @@ class StackedRotEquiConv2dCore:
                         self.weights_all.append(weights_all_rotations)
 
                         # apply regularization to all rotated versions
-                        reg = lambda w: smoothness_regularizer_2d(w, conv_smooth_weight * sm) + \
-                                        group_sparsity_regularizer_2d(w, conv_sparse_weight * sp)
-                        reg(weights_all_rotations)
+                        self.smooth_reg = smoothness_regularizer_2d(
+                            weights_all_rotations, conv_smooth_weight * sm)
+                        self.sparse_reg = group_sparsity_regularizer_2d(
+                            weights_all_rotations, conv_sparse_weight * sp)
+                        tf.losses.add_loss(
+                            self.smooth_reg,
+                            loss_collection=tf.GraphKeys.REGULARIZATION_LOSSES)
+                        tf.losses.add_loss(
+                            self.sparse_reg,
+                            loss_collection=tf.GraphKeys.REGULARIZATION_LOSSES)
 
                         # conv = tf.nn.conv2d(conv, weights_all_rotations, strides=[1, st, st, 1],
                         #                     dilations=[1, rt, rt, 1], padding=pd)
                         assert rt == 1, 'Dilation not supported. Need to upgrade to TF 1.5'
                         conv = tf.nn.conv2d(conv, weights_all_rotations,
                                             strides=[1, st, st, 1], padding=pd)
+                        if shared_biases:
+                            s = conv.shape.as_list()
+                            conv = tf.reshape(conv, [-1] + s[1:3] + [num_rotations, nf_out])
+
                         enable_scale = i < len(filter_size) - 1
                         conv = layers.batch_norm(conv, center=True, scale=enable_scale, decay=0.95,
                                                  is_training=base.is_training, fused=fused_bn)
-                        if fn is not None:
+                        if shared_biases:
+                            conv = tf.reshape(conv, [-1] + s[1:])
+                        if not (fn == 'none'):
                             conv = ACTIVATION_FN[fn](conv)
                         self.conv.append(conv)
                         nf_in = nf_out * num_rotations
@@ -152,6 +168,7 @@ class StackedRotEquiHermiteConv2dCore:
                  inputs,
                  num_rotations=8,
                  upsampling=2,
+                 shared_biases=True,
                  filter_size=[13, 5, 5],
                  num_filters=[8, 16, 32],
                  stride=[1, 1, 1],
@@ -196,19 +213,32 @@ class StackedRotEquiHermiteConv2dCore:
                         self.weights_all.append(weights_all_rotations)
 
                         # apply regularization to all rotated versions
-                        reg = lambda w: smoothness_regularizer_2d(w, conv_smooth_weight * sm) + \
-                                        group_sparsity_regularizer_2d(w, conv_sparse_weight * sp)
-                        reg(weights_all_rotations)
+                        self.smooth_reg = smoothness_regularizer_2d(
+                            weights_all_rotations, conv_smooth_weight * sm)
+                        self.sparse_reg = group_sparsity_regularizer_2d(
+                            weights_all_rotations, conv_sparse_weight * sp)
+                        tf.losses.add_loss(
+                            self.smooth_reg,
+                            loss_collection=tf.GraphKeys.REGULARIZATION_LOSSES)
+                        tf.losses.add_loss(
+                            self.sparse_reg,
+                            loss_collection=tf.GraphKeys.REGULARIZATION_LOSSES)
 
                         # conv = tf.nn.conv2d(conv, weights_all_rotations, strides=[1, st, st, 1],
                         #                     dilations=[1, rt, rt, 1], padding=pd)
                         assert rt == 1, 'Dilation not supported. Need to upgrade to TF 1.5'
                         conv = tf.nn.conv2d(conv, weights_all_rotations,
                                             strides=[1, st, st, 1], padding=pd)
+                        if shared_biases:
+                            s = conv.shape.as_list()
+                            conv = tf.reshape(conv, [-1] + s[1:3] + [num_rotations, nf_out])
+
                         enable_scale = i < len(filter_size) - 1
-                        conv = layers.batch_norm(conv, center=True, scale=enable_scale, decay=0.95,
+                        conv = layers.batch_norm(conv, center=True, scale=enable_scale, decay=0.9,
                                                  is_training=base.is_training, fused=fused_bn)
-                        if fn is not None:
+                        if shared_biases:
+                            conv = tf.reshape(conv, [-1] + s[1:])
+                        if not (fn == 'none'):
                             conv = ACTIVATION_FN[fn](conv)
                         self.conv.append(conv)
                         nf_in = nf_out * num_rotations

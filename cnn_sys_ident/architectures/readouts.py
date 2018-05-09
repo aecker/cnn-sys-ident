@@ -54,7 +54,7 @@ class SpatialXFeatureJointL1Readout:
 
                 # bias and output nonlinearity
                 _, responses = data.train()
-                bias_init = inv_soft_threshold(responses.mean(axis=0))
+                bias_init = 0.5 * inv_soft_threshold(responses.mean(axis=0))
                 self.biases = tf.get_variable(
                     'biases',
                     shape=[num_neurons],
@@ -110,7 +110,7 @@ class SpatialSparseXFeatureDenseReadout:
 
                 # bias and output nonlinearity
                 _, responses = data.train()
-                bias_init = inv_soft_threshold(responses.mean(axis=0))
+                bias_init = 0.5 * inv_soft_threshold(responses.mean(axis=0))
                 self.biases = tf.get_variable(
                     'biases',
                     shape=[num_neurons],
