@@ -126,6 +126,7 @@ class RegPath(Messager):
         return self._model_table().build(key, base, reg_params)
 
     def _make_tuples(self, key):
+        print(key)
         model = self._model_table().instance(key)
         c_key = model.fetch1()
         reg_param_bounds = OrderedDict()

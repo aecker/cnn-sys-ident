@@ -26,7 +26,8 @@ class Trainer:
             learning_rate=0.001,
             batch_size=256,
             val_steps=100,
-            patience=5):
+            patience=5,
+            lr_decay_steps=2):
         with self.graph.as_default():
             update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
             inputs_val, res_val = self.data.val()
@@ -34,7 +35,7 @@ class Trainer:
             not_improved = 0
             iter_num = 0
             self.session.run(tf.global_variables_initializer())
-            for _ in range(2):
+            for _ in range(lr_decay_steps):
                 while iter_num < max_iter:
 
                     # training step
@@ -83,4 +84,17 @@ class Trainer:
             if np.std(res) > 1e-5 and np.std(pred) > 1e-5:
                 rho[i] = stats.pearsonr(res, pred)[0]
         return rho.mean()
+
+    def compute_val_corr(self):
+        with self.graph.as_default():
+            inputs, responses = self.data.val()
+            feed_dict = {self.base.inputs: inputs,
+                         self.base.responses: responses,
+                         self.base.is_training: False}
+            predictions = self.session.run(self.model.predictions, feed_dict)
+        rho = np.zeros(self.data.num_neurons)
+        for i, (res, pred) in enumerate(zip(responses.T, predictions.T)):
+            if np.std(res) > 1e-5 and np.std(pred) > 1e-5:
+                rho[i] = stats.pearsonr(res, pred)[0]
+        return rho
 

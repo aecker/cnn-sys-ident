@@ -1,13 +1,13 @@
 from .parameters import Model, Core, Readout
 
 MODELS = {
-    'RotEquiSparse':
+    'CNNSparse':
         Model.CorePlusReadout() * \
-        Core.ThreeLayerRotEquiConv2d() * \
+        Core.ThreeLayerConv2d() * \
         Readout.SpatialXFeatureJointL1(),
-    'RotEquiDense':
+    'CNNDense':
         Model.CorePlusReadout() * \
-        Core.ThreeLayerRotEquiConv2d() * \
+        Core.ThreeLayerConv2d() * \
         Readout.SpatialSparseXFeatureDense(),
     'HermiteSparse':
         Model.CorePlusReadout() * \
