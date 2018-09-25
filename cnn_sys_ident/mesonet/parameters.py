@@ -22,6 +22,10 @@ class Core(core.Core, dj.Lookup):
             'num_filters': [
                 [64, 128, 128],
                 [64, 128, 256],
+                [32, 32, 32],
+                [64, 64, 64],
+                [128, 128, 128],
+                [128, 128, 256],
             ],
             'stride': [[1, 1, 1]],
             'rate': [[1, 1, 1]],
@@ -49,6 +53,10 @@ class Core(core.Core, dj.Lookup):
             'shared_biases': [False, True],
             'filter_size': [[13, 5, 5]],
             'num_filters': [
+                [16, 16, 8],
+                [16, 16, 10],
+                [16, 16, 12],
+                [16, 16, 14],
                 [16, 16, 16],
                 [16, 16, 20],
                 [16, 16, 24],
@@ -98,6 +106,19 @@ class Readout(readout.Readout, dj.Lookup):
         def content(self):
             return cartesian_product(self._params)
 
+    class SpatialXFeatureJointL1Transfer(readout.SpatialXFeatureJointL1Transfer, dj.Part):
+        _params = {
+            'readout_sparsity_min': [0.005],
+            'readout_sparsity_max': [0.03],
+            'positive_feature_weights': [False],
+            'init_masks': ['rand'],
+            'k_transfer': [2, 4, 8, 16, 32],
+        }
+
+        @property
+        def content(self):
+            return cartesian_product(self._params)
+
 
 @schema
 class Model(model.Model, dj.Lookup):
@@ -121,6 +142,11 @@ class Model(model.Model, dj.Lookup):
             for core_key, readout_key in product(
                     Core.ThreeLayerRotEquiHermiteConv2d().fetch(dj.key),
                     Readout.SpatialSparseXFeatureDense().fetch(dj.key)):
+                yield(dict(core_key, **readout_key))
+            for core_key, readout_key in product(
+                    (Core.ThreeLayerRotEquiHermiteConv2d() \
+                         & 'num_filters_2 = 16 AND shared_biases = False').fetch(dj.key),
+                    Readout.SpatialXFeatureJointL1Transfer().fetch(dj.key)):
                 yield(dict(core_key, **readout_key))
 
 
@@ -165,3 +191,5 @@ class Fit(fit.Fit, dj.Computed):
             tupl['val_loss'] = trainer.session.run(trainer.poisson, feed_dict_val)
             tupl['test_corr'] = trainer.compute_test_corr()
             self.insert1(tupl)
+
+

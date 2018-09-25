@@ -21,3 +21,12 @@ class SpatialSparseXFeatureDense(RegularizableComponent):
         ('positive_feature_weights', 'boolean # enforce positive feature weights?'),
         ('init_masks', 'ENUM("sta", "rand") # initializaton method for masks'),
     ])
+
+class SpatialXFeatureJointL1Transfer(RegularizableComponent):
+    _regularization_parameters = ['readout_sparsity']
+    _parameters = OrderedDict([
+        ('positive_feature_weights', 'boolean # enforce positive feature weights?'),
+        ('init_masks', 'ENUM("sta", "rand")   # initializaton method for masks'),
+        ('k_transfer', 'int unsigned          # ratio of transfer to training neurons'),
+    ])
+
