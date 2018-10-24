@@ -1,22 +1,93 @@
 import datajoint as dj
 from cnn_sys_ident.mesonet.parameters import Fit, RegPath, Model, Core, Readout
 from cnn_sys_ident.mesonet.data import MultiDataset
+from cnn_sys_ident.mesonet import MODELS
 
-#model_rel = Model.CorePlusReadout() * \
-#    Readout.SpatialXFeatureJointL1() * \
-#    Core.ThreeLayerRotEquiConv2d() & \
-#    'num_rotations in (8, 12) and num_filters_0 in (8, 16)' & \
-#    'init_masks="rand" and positive_feature_weights=0'
-#model_rel = Model.CorePlusReadout() * \
-#    Readout.SpatialXFeatureJointL1() * \
-#    Core.ThreeLayerRotEquiHermiteConv2d() & \
-#    'init_masks="rand" and positive_feature_weights=0'
-model_rel = Model.CorePlusReadout() * \
-    Readout.SpatialSparseXFeatureDense() * \
-    Core.ThreeLayerRotEquiHermiteConv2d() & \
-    'init_masks="rand" and positive_feature_weights=0'
-rel = MultiDataset() * RegPath() * model_rel
+'''
+RegPath().populate(reserve_jobs=True)
 
-key = dict(data_hash='cfcd208495d565ef66e7dff9f98764da')
-key = (rel & key).fetch(dj.key)
-Fit().populate(key, reserve_jobs=True, suppress_errors=True, order='random')
+""" Main model selection using
+   - three layer rotation-equivariant net
+   - filter sizes: 13, 5, 5
+   - positive readout weights
+   - sparse readout weights
+   - no shared biases across rotations
+"""
+data_key = dict(data_hash='cfcd208495d565ef66e7dff9f98764da')
+model_rel = MODELS['HermiteSparse'] * MultiDataset() & data_key & \
+    'shared_biases=False AND positive_feature_weights=True'
+
+Fit().populate(model_rel, reserve_jobs=True, suppress_errors=True, order='random')
+
+
+""" Ablation experiments """
+n = (Fit() * model_rel).fetch('num_filters_2', order_by='val_loss', limit=1)[0]
+num_filters = 'num_filters_2={:d}'.format(n)
+
+# No sparsity on feature weights
+model_rel = MODELS['HermiteDense'] & \
+    'shared_biases=False AND positive_feature_weights=True' & num_filters
+Fit().populate(model_rel, reserve_jobs=True, suppress_errors=True, order='random')
+
+# No positivity constraint on feature weights
+model_rel = MODELS['HermiteSparse'] & \
+    'shared_biases=False AND positive_feature_weights=False' & num_filters
+Fit().populate(model_rel, reserve_jobs=True, suppress_errors=True, order='random')
+
+# Shared biases across rotations
+model_rel = MODELS['HermiteSparse'] & \
+    'shared_biases=True AND positive_feature_weights=True' & num_filters
+Fit().populate(model_rel, reserve_jobs=True, suppress_errors=True, order='random')
+
+# Regular CNN
+model_rel = MODELS['CNNSparse'] & 'positive_feature_weights=True'
+Fit().populate(model_rel, reserve_jobs=True, suppress_errors=True, order='random')
+'''
+
+'''
+data_key = dict(data_hash='cfcd208495d565ef66e7dff9f98764da')
+# for k in [48, 32]:
+for k in [16]:
+
+    num_filters = 'num_filters_2 = {:d}'.format(k)
+
+    # No sparsity on feature weights
+    model_rel = MODELS['HermiteDense'] * MultiDataset() & data_key & \
+        'shared_biases=False AND positive_feature_weights=False' & num_filters
+    Fit().populate(model_rel, reserve_jobs=True, suppress_errors=True, order='random')
+
+    # No positivity constraint on feature weights
+    model_rel = MODELS['HermiteSparse'] * MultiDataset() & data_key & \
+        'shared_biases=False AND positive_feature_weights=False' & num_filters
+    Fit().populate(model_rel, reserve_jobs=True, suppress_errors=True, order='random')
+
+    # Shared biases across rotations
+    model_rel = MODELS['HermiteSparse'] * MultiDataset() & data_key & \
+        'shared_biases=True AND positive_feature_weights=False' & num_filters
+    Fit().populate(model_rel, reserve_jobs=True, suppress_errors=True, order='random')
+
+
+# Regular CNN
+data_key = dict(data_hash='cfcd208495d565ef66e7dff9f98764da')
+n = [128, 128, 256]
+key = {'num_filters_{:d}'.format(i): n[i] for i in range(len(n))}
+model_rel = MODELS['CNNSparse'] * MultiDataset() & data_key \
+    & 'positive_feature_weights=False' & key
+Fit().populate(model_rel, reserve_jobs=True, suppress_errors=True, order='random')
+
+
+RegPath().populate(reserve_jobs=True)
+
+data_key = dict(data_hash='cfcd208495d565ef66e7dff9f98764da')
+for k in [8, 16, 32, 12, 24, 40, 10, 14, 20, 28]:
+    num_filters = 'num_filters_2 = {:d}'.format(k)
+    model_rel = MODELS['HermiteSparse'] * MultiDataset() \
+        & data_key & num_filters \
+        & 'shared_biases=False AND positive_feature_weights=False'
+
+    Fit().populate(model_rel, reserve_jobs=True, suppress_errors=True, order='random')
+'''
+
+data_key = dict(data_hash='cfcd208495d565ef66e7dff9f98764da')
+model_rel = MODELS['HermiteTransfer'] * MultiDataset() & data_key
+Fit().populate(model_rel, reserve_jobs=True, suppress_errors=True, order='random')
