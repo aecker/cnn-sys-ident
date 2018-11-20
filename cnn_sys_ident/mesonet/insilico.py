@@ -157,3 +157,51 @@ class SizeContrastTuning(dj.Computed):
         tuple = key
         tuple['tuning_curve'] = model.base.evaluate(model.predictions, feed_dict=feed_dict)
         self.insert1(tuple)
+
+
+@schema
+class OrthPlaidsContrastParams(dj.Lookup):
+    definition = """
+        opc_param_id     : tinyint unsigned  # id for parameter set
+        ---
+        min_contrast    : float             # minimum contrast (Michelson)
+        num_contrasts   : tinyint unsigned  # number of contrast levels
+        contrast_increment : float          # relative contrast increments
+        """
+
+    contents = [
+        [1, 2**-5, 9, np.sqrt(2)]
+    ]
+
+    def gabor_set(self, key, canvas_size, loc, size, spatial_freq, orientation, phase):
+        p = (self & key).fetch1()
+        center_range = [loc[0], loc[0]+1, loc[1], loc[1]+1]
+        c = p['min_contrast'] * p['contrast_increment'] ** np.arange(p['num_contrasts'])
+        c = np.concatenate([np.zeros(1), c], axis=0)
+        g = GaborSet(canvas_size, center_range, [size], [spatial_freq], c,
+                     [orientation], [phase], relative_sf=False)
+        return g
+
+
+@schema
+class OrthPlaidsContrast(dj.Computed):
+    definition = """
+        -> OptimalGabor.Unit
+        ---
+        tuning_curve  : blob  # sizes x contrasts
+    """
+
+    def _make_tuples(self, key):
+        model = Fit().load_model(key)
+        s = model.base.inputs.shape.as_list()
+        canvas_size = [s[2], s[1]]
+        loc, sz, sf, _, ori, ph = OptimalGabor.Unit().params(key)
+        g = OrthPlaidsContrastParams().gabor_set(key, canvas_size, loc, sz, sf, ori, ph)
+        components = g.images()
+        plaids = components[None,...] + components[:,None,...]
+        plaids = np.reshape(plaids, [-1] + s[1:])
+        feed_dict = {model.base.inputs: plaids,
+                     model.base.is_training: False}
+        tuple = key
+        tuple['tuning_curve'] = model.base.evaluate(model.predictions, feed_dict=feed_dict)
+        self.insert1(tuple)
