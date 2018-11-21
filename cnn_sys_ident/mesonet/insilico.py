@@ -96,8 +96,8 @@ class OptimalGabor(dj.Computed):
             r = model.base.evaluate(model.predictions, feed_dict=feed_dict)
             max_r = r.max(axis=0)
             max_i = batch_idx * BATCH_SIZE + r.argmax(axis=0)
-            max_response = np.maximum(max_response, max_r)
             new_max = (max_response < max_r)
+            max_response = np.maximum(max_response, max_r)
             max_idx = ~new_max * max_idx + new_max * max_i
             if not (batch_idx % 10):
                 print(batch_idx, max_response.mean())
