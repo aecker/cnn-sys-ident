@@ -17,6 +17,10 @@ MODELS = {
         Model.CorePlusReadout() * \
         Core.ThreeLayerRotEquiHermiteConv2d() * \
         Readout.SpatialSparseXFeatureDense(),
+    'HermiteDenseSeparate':
+        Model.CorePlusReadout() * \
+        Core.ThreeLayerRotEquiHermiteConv2d() * \
+        Readout.SpatialSparseXFeatureDenseSeparate(),
     'HermiteTransfer':
         Model.CorePlusReadout() * \
         Core.ThreeLayerRotEquiHermiteConv2d() * \

@@ -88,6 +88,14 @@ for k in [8, 16, 32, 12, 24, 40, 10, 14, 20, 28]:
     Fit().populate(model_rel, reserve_jobs=True, suppress_errors=True, order='random')
 '''
 
+'''
 data_key = dict(data_hash='cfcd208495d565ef66e7dff9f98764da')
 model_rel = MODELS['HermiteTransfer'] * MultiDataset() & data_key
+Fit().populate(model_rel, reserve_jobs=True, suppress_errors=True, order='random')
+'''
+
+
+# Control with L2 on feature weights, applied separately from L1 on masks
+data_key = dict(data_hash='cfcd208495d565ef66e7dff9f98764da')
+model_rel = MODELS['HermiteDenseSeparate'] * MultiDataset() & data_key & 'num_filters_2=16 AND shared_biases=False'
 Fit().populate(model_rel, reserve_jobs=True, suppress_errors=True, order='random')

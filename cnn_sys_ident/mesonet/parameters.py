@@ -106,6 +106,20 @@ class Readout(readout.Readout, dj.Lookup):
         def content(self):
             return cartesian_product(self._params)
 
+    class SpatialSparseXFeatureDenseSeparate(readout.SpatialSparseXFeatureDenseSeparate, dj.Part):
+        _params = {
+            'mask_sparsity_min': [0.01],
+            'mask_sparsity_max': [0.1],
+            'feature_l2_min': [0.1],
+            'feature_l2_max': [1.0],
+            'positive_feature_weights': [False],
+            'init_masks': ['rand'],
+        }
+
+        @property
+        def content(self):
+            return cartesian_product(self._params)
+
     class SpatialXFeatureJointL1Transfer(readout.SpatialXFeatureJointL1Transfer, dj.Part):
         _params = {
             'readout_sparsity_min': [0.005],
@@ -142,6 +156,11 @@ class Model(model.Model, dj.Lookup):
             for core_key, readout_key in product(
                     Core.ThreeLayerRotEquiHermiteConv2d().fetch(dj.key),
                     Readout.SpatialSparseXFeatureDense().fetch(dj.key)):
+                yield(dict(core_key, **readout_key))
+            for core_key, readout_key in product(
+                    (Core.ThreeLayerRotEquiHermiteConv2d() \
+                         & 'num_filters_2 = 16 AND shared_biases = False').fetch(dj.key),
+                    Readout.SpatialSparseXFeatureDenseSeparate().fetch(dj.key)):
                 yield(dict(core_key, **readout_key))
             for core_key, readout_key in product(
                     (Core.ThreeLayerRotEquiHermiteConv2d() \
