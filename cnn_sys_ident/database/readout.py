@@ -15,6 +15,13 @@ class SpatialXFeatureJointL1(RegularizableComponent):
         ('init_masks', 'ENUM("sta", "rand") # initializaton method for masks'),
     ])
 
+class SpatialXFeatureSeparateL1(RegularizableComponent):
+    _regularization_parameters = ['mask_sparsity', 'feature_sparsity']
+    _parameters = OrderedDict([
+        ('positive_feature_weights', 'boolean # enforce positive feature weights?'),
+        ('init_masks', 'ENUM("sta", "rand") # initializaton method for masks'),
+    ])
+
 class SpatialSparseXFeatureDense(RegularizableComponent):
     _regularization_parameters = ['mask_sparsity']
     _parameters = OrderedDict([
