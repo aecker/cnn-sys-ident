@@ -72,7 +72,7 @@ class Trainer:
             test_corr = self.compute_test_corr()
         return iter_num, val_loss, test_corr
 
-    def compute_test_corr(self):
+    def compute_test_corr(self, average=True):
         with self.graph.as_default():
             inputs, responses = self.data.test()
             feed_dict = {self.base.inputs: inputs,
@@ -83,7 +83,7 @@ class Trainer:
         for i, (res, pred) in enumerate(zip(responses.T, predictions.T)):
             if np.std(res) > 1e-5 and np.std(pred) > 1e-5:
                 rho[i] = stats.pearsonr(res, pred)[0]
-        return rho.mean()
+        return rho.mean() if average else rho
 
     def compute_val_corr(self):
         with self.graph.as_default():

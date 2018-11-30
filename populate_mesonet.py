@@ -1,4 +1,5 @@
 import datajoint as dj
+import numpy as np
 from cnn_sys_ident.mesonet.parameters import Fit, RegPath, Model, Core, Readout
 from cnn_sys_ident.mesonet.data import MultiDataset
 from cnn_sys_ident.mesonet import MODELS
@@ -94,8 +95,30 @@ model_rel = MODELS['HermiteTransfer'] * MultiDataset() & data_key
 Fit().populate(model_rel, reserve_jobs=True, suppress_errors=True, order='random')
 '''
 
-
+'''
 # Control with L2 on feature weights, applied separately from L1 on masks
 data_key = dict(data_hash='cfcd208495d565ef66e7dff9f98764da')
-model_rel = MODELS['HermiteDenseSeparate'] * MultiDataset() & data_key & 'num_filters_2=16 AND shared_biases=False'
+model_rel = MODELS['HermiteSparseSeparate'] * MultiDataset() & data_key & 'num_filters_2=16 AND shared_biases=False'
 Fit().populate(model_rel, reserve_jobs=True, suppress_errors=True, order='random')
+'''
+
+'''
+# Control with data split in two halves
+from cnn_sys_ident.mesonet.controls import FitDataSplit
+data_key = dict(data_hash='cfcd208495d565ef66e7dff9f98764da')
+model_rel = MODELS['HermiteSparse'] * MultiDataset() & data_key & 'num_filters_2=16 AND shared_biases=False'
+FitDataSplit().populate(model_rel, reserve_jobs=True, suppress_errors=True, order='random')
+'''
+
+'''
+from cnn_sys_ident.mesonet.controls import FitDataSplit, MEI
+unit_ids = np.load('analysis/paper/figures/unit_ids.npy')
+keys = [dict(unit_id=id) for id in unit_ids.flatten()]
+MEI.populate(keys, reserve_jobs=True, suppress_errors=True, order='random')
+'''
+
+from cnn_sys_ident.mesonet.vis import MEI
+unit_ids = np.load('analysis/paper/figures/unit_ids.npy')
+keys = [dict(unit_id=id) for id in unit_ids.flatten()]
+MEI.populate(keys, 'reg_seed=1954773306', reserve_jobs=True, suppress_errors=True, order='random')
+
