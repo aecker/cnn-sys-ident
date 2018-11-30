@@ -85,3 +85,34 @@ class ActivityMaximization:
 
         images, predictions = self.session.run([self.images, self.predictions])
         return images, predictions, np.array(loss)
+
+
+class GradientRF:
+    def __init__(self, graph, checkpoint_file, input_shape):
+        gdef = graph.as_graph_def()
+        with graph.as_default():
+            var_names = [v.name[:-2] for v in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)]
+        self.graph = tf.Graph()
+        with self.graph.as_default():
+            self.image = tf.get_variable('inputs', shape=input_shape,
+                        initializer=tf.constant_initializer(0.0))
+            self._image = tf.reshape(self.image, [1, input_shape[0], input_shape[1], 1])
+            self.predictions, = tf.import_graph_def(
+                        gdef, input_map={'inputs:0': self._image, 'is_training:0': tf.constant(False)},
+                        name='net', return_elements=['readout/output:0'])
+            var_list = {name: self.graph.get_tensor_by_name('net/{}:0'.format(name)) for name in var_names}
+            self.saver = tf.train.Saver(var_list=var_list)
+            self.session = tf.Session()
+            self.saver.restore(self.session, checkpoint_file)
+            self.session.run(tf.global_variables_initializer())
+
+    def __del__(self):
+        try:
+            if not self.session == None:
+                self.session.close()
+        except:
+            pass
+
+    def gradient(self, cell_id):
+        grad = tf.gradients(self.predictions[0,cell_id], self.image)[0]
+        return self.session.run(grad)
