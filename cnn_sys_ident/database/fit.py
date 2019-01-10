@@ -25,9 +25,12 @@ class Fit:
     def _make_tuples(self, key):
         raise NotImplementedError('To be implemented by child classes.')
 
-    def get_model(self, key):
+    def get_hash(self, key):
         key = (self.key_source & key).fetch1(dj.key)
-        log_hash = key_hash(key)
+        return key_hash(key)
+
+    def get_model(self, key):
+        log_hash = self.get_hash(key)
         data = (self._data_table() & key).load_data()
         log_dir = os.path.join('checkpoints', self._data_table.database)
         base = BaseModel(data, log_dir=log_dir, log_hash=log_hash)
