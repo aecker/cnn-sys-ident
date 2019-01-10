@@ -35,7 +35,7 @@ class GaborParams(dj.Lookup):
         """
 
     contents = [
-        [1, 27, 49, 5, 28, 8, 8, 1.25, (1.3**-1), 4, 1.3, 2**-5, 6, 2, 12, 8],
+        [1, 27, 49, 5, 28, 8, 8, 1.25, (1.3**-1), 4, 1.3, 2**-3, 6, 2, 12, 8],
     ]
 
     def gabor_set(self, key, canvas_size):
@@ -80,8 +80,7 @@ class OptimalGabor(dj.Computed):
         model_rel = MODELS['HermiteSparse'] * dataset \
             & 'positive_feature_weights=False AND shared_biases=False' \
             & {'num_filters_2': num_filters}
-        print('Recompute best model!!')
-        key = (Fit() * model_rel).fetch(dj.key, order_by='val_loss', limit=2)[1]
+        key = (Fit() * model_rel).fetch(dj.key, order_by='val_loss', limit=1)[0]
         return Fit() * GaborParams() & key
 
     def _make_tuples(self, key):
@@ -125,7 +124,7 @@ class SizeContrastTuningParams(dj.Lookup):
         """
 
     contents = [
-        [1, 8, 12, 1.15, 2**-5.5, 12, np.sqrt(2)]
+        [1, 8, 12, 1.2, 2**-3.5, 12, np.sqrt(2)]
     ]
 
     def gabor_set(self, key, canvas_size, loc, spatial_freq, orientation, phase):
