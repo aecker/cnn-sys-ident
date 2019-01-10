@@ -35,7 +35,7 @@ class GaborParams(dj.Lookup):
         """
 
     contents = [
-        [1, 27, 49, 5, 28, 8, 8, 1.25, (1.3**-1), 4, 1.3, 2**-5, 6, 2, 12, 8]
+        [1, 27, 49, 5, 28, 8, 8, 1.25, (1.3**-1), 4, 1.3, 2**-5, 6, 2, 12, 8],
     ]
 
     def gabor_set(self, key, canvas_size):
@@ -141,22 +141,32 @@ class SizeContrastTuningParams(dj.Lookup):
 @schema
 class SizeContrastTuning(dj.Computed):
     definition = """
-        -> OptimalGabor.Unit
-        ---
-        tuning_curve  : blob  # sizes x contrasts
+        -> OptimalGabor
     """
+
+    class Unit(dj.Part):
+        definition = """
+            -> master
+            -> OptimalGabor.Unit
+            ---
+            tuning_curve  : blob  # sizes x contrasts
+        """
 
     def _make_tuples(self, key):
         model = Fit().load_model(key)
         s = model.base.inputs.shape.as_list()
         canvas_size = [s[2], s[1]]
-        loc, _, sf, _, ori, ph = OptimalGabor.Unit().params(key)
-        g = SizeContrastTuningParams().gabor_set(key, canvas_size, loc, sf, ori, ph)
-        feed_dict = {model.base.inputs: g.images()[...,None],
-                     model.base.is_training: False}
-        tuple = key
-        tuple['tuning_curve'] = model.base.evaluate(model.predictions, feed_dict=feed_dict)
-        self.insert1(tuple)
+        self.insert1(key)
+        for key in (OptimalGabor.Unit() & key).fetch(dj.key):
+            loc, _, sf, _, ori, ph = OptimalGabor.Unit().params(key)
+            g = SizeContrastTuningParams().gabor_set(key, canvas_size, loc, sf, ori, ph)
+            feed_dict = {model.base.inputs: g.images()[...,None],
+                         model.base.is_training: False}
+            tupl = key
+            pred = model.base.evaluate(model.predictions, feed_dict=feed_dict)
+            tupl['tuning_curve'] = pred[:,key['unit_id']].reshape([len(g.sizes), len(g.contrasts)])
+            self.Unit.insert1(tupl)
+            print(key['unit_id'])
 
 
 @schema
@@ -188,7 +198,7 @@ class OrthPlaidsContrast(dj.Computed):
     definition = """
         -> OptimalGabor.Unit
         ---
-        tuning_curve  : blob  # sizes x contrasts
+        tuning_curve  : blob  # TO DO
     """
 
     def _make_tuples(self, key):
@@ -202,6 +212,6 @@ class OrthPlaidsContrast(dj.Computed):
         plaids = np.reshape(plaids, [-1] + s[1:])
         feed_dict = {model.base.inputs: plaids,
                      model.base.is_training: False}
-        tuple = key
-        tuple['tuning_curve'] = model.base.evaluate(model.predictions, feed_dict=feed_dict)
-        self.insert1(tuple)
+        tupl = key
+        tupl['tuning_curve'] = model.base.evaluate(model.predictions, feed_dict=feed_dict)
+        self.insert1(tupl)
