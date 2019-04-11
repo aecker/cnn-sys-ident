@@ -71,6 +71,16 @@ class OptimalGabor(dj.Computed):
             idx = (self & key).fetch1('max_index')
             return gabor_set.params_from_idx(idx)
 
+        def params_dict(self, key):
+            gabor_set = GaborParams().gabor_set(key, None)
+            idx = (self & key).fetch1('max_index')
+            return gabor_set.params_dict_from_idx(idx)
+
+        def optimal_gabor(self, key, canvas_size=[64, 36]):
+            gabor_set = GaborParams().gabor_set(key, canvas_size)
+            idx = (self & key).fetch1('max_index')
+            return gabor_set.gabor_from_idx(idx)
+
 
     @property
     def key_source(self):
@@ -179,15 +189,20 @@ class OrthPlaidsContrastParams(dj.Lookup):
         """
 
     contents = [
-        [1, 2**-5, 9, np.sqrt(2)]
+        [1, 2**-3, 9, np.sqrt(2)]
     ]
+    
+    def contrasts(self, key):
+        min_contrast, contrast_increment, num_contrasts = (self & key).fetch1(
+            'min_contrast', 'contrast_increment', 'num_contrasts')
+        c = min_contrast * contrast_increment ** np.arange(num_contrasts)
+        c = np.concatenate([np.zeros(1), c], axis=0)
+        return c
 
     def gabor_set(self, key, canvas_size, loc, size, spatial_freq, orientation, phase):
-        p = (self & key).fetch1()
         center_range = [loc[0], loc[0]+1, loc[1], loc[1]+1]
-        c = p['min_contrast'] * p['contrast_increment'] ** np.arange(p['num_contrasts'])
-        c = np.concatenate([np.zeros(1), c], axis=0)
-        g = GaborSet(canvas_size, center_range, [size], [spatial_freq], c,
+        contrasts = self.contrasts(key)
+        g = GaborSet(canvas_size, center_range, [size], [spatial_freq], contrasts,
                      [orientation], [phase], relative_sf=False)
         return g
 
@@ -195,22 +210,39 @@ class OrthPlaidsContrastParams(dj.Lookup):
 @schema
 class OrthPlaidsContrast(dj.Computed):
     definition = """
-        -> OptimalGabor.Unit
+        -> OptimalGabor
         ---
-        tuning_curve  : blob  # TO DO
+        contrasts   : blob   # list of contrasts
     """
+
+    class Unit(dj.Part):
+        definition = """
+            -> master
+            -> OptimalGabor.Unit
+            ---
+            tuning_curve  : blob  # contrast preferred x contrast orthogonal
+        """
 
     def _make_tuples(self, key):
         model = Fit().load_model(key)
         s = model.base.inputs.shape.as_list()
         canvas_size = [s[2], s[1]]
-        loc, sz, sf, _, ori, ph = OptimalGabor.Unit().params(key)
-        g = OrthPlaidsContrastParams().gabor_set(key, canvas_size, loc, sz, sf, ori, ph)
-        components = g.images()
-        plaids = components[None,...] + components[:,None,...]
-        plaids = np.reshape(plaids, [-1] + s[1:])
-        feed_dict = {model.base.inputs: plaids,
-                     model.base.is_training: False}
-        tupl = key
-        tupl['tuning_curve'] = model.base.evaluate(model.predictions, feed_dict=feed_dict)
-        self.insert1(tupl)
+        contrasts = OrthPlaidsContrastParams().contrasts(key)
+        key.update(contrasts=contrasts)
+        self.insert1(key)
+        for i, key in enumerate((OptimalGabor.Unit() & key).fetch(dj.key)):
+            loc, sz, sf, _, ori, ph = OptimalGabor.Unit().params(key)
+            g_pref = OrthPlaidsContrastParams().gabor_set(key, canvas_size, loc, sz, sf, ori, ph)
+            g_orth = OrthPlaidsContrastParams().gabor_set(key, canvas_size, loc, sz, sf, ori + np.pi/2, ph)
+            comps_pref = g_pref.images()
+            comps_orth = g_orth.images()
+            plaids = comps_pref[None,...] + comps_orth[:,None,...]
+            plaids = np.reshape(plaids, [-1] + s[1:])
+            feed_dict = {model.base.inputs: plaids,
+                         model.base.is_training: False}
+            tuning_curve = model.base.evaluate(model.predictions[:,key['unit_id']], feed_dict=feed_dict)
+            tupl = key
+            tupl['tuning_curve'] = tuning_curve.reshape([len(contrasts), len(contrasts)])
+            self.Unit.insert1(tupl)
+            if not (i % 10):
+                print('Unit {:d}'.format(i))
