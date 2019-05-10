@@ -1,7 +1,7 @@
 import numpy as np
 import pickle
 
-DATA_FILE = '../../iclr2019-checkpoints/data.pkl'
+DATA_FILE = 'checkpoints/data.pkl'
 
 class Dataset:
     def __init__(self,
@@ -24,7 +24,8 @@ class Dataset:
         sd = responses_train.std(axis=0)
         sd[sd < (sd.mean() / 100)] = 1
         def rectify_and_normalize(x):
-            x[x < 0] = 0
+            x[x < 0] = 0    # responses are non-negative; this gets rid
+                            # of small negative numbers due to numerics
             return x / sd
         self.responses_train = rectify_and_normalize(responses_train)
         self.responses_val = rectify_and_normalize(responses_val)
