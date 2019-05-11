@@ -7,14 +7,14 @@ Alexander S. Ecker, Fabian H. Sinz, Emmanouil Froudarakis, Paul G. Fahey, Santia
 
 ## Reproducing models
 
-If you're just interested in reproducing the various mdoels and baselines described in the paper, check out the Jupyter notebook `models.ipynb`.
+If you're just interested in reproducing the various mdoels and baselines described in the paper, check out the Jupyter notebook [models](models.ipynb).
 It contains all the relevant models ready-to-use.
-All code necessary to construct, train and evaluate the models is contained in the module `cnn_sys_ident.architectures`.
+All code necessary to construct, train and evaluate the models is contained in the module [cnn_sys_ident.architectures](../../cnn_sys_ident/architectures).
 
 
 ## Reproducing experiments and figures
 
-The Jupyter norebooks in this folder contain the code we used to analyze the results and generate the figrues in the paper.
+The Jupyter notebooks in this folder contain the code we used to analyze the results and generate the figrues in the paper.
 Note, however, that they won't run out-of-the-box, as they depend on a MySQL database and a data management tool ([DataJoint](https://datajoint.io)) that we use to keep track of our experiments.
 Therefore, reproducing the experiments is a bit mode involved than simply running a script, as it requires setting up DataJoint and the MySQL server.
 If you're interested in going that route, don't hesitate to touch base; we're happy to help.
