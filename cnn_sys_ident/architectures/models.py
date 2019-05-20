@@ -58,6 +58,9 @@ class BaseModel:
     def evaluate(self, var, *args, **kwargs):
         return self.tf_session.session.run(var, *args, **kwargs)
 
+    def load(self):
+        self.tf_session.load()
+
 
 class CorePlusReadoutModel:
     def __init__(self, base, core, readout):
@@ -66,3 +69,5 @@ class CorePlusReadoutModel:
         self.readout = readout
         self.predictions = readout.output
 
+    def load(self):
+        self.base.load()
