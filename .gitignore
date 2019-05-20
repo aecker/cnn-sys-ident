@@ -1,6 +1,6 @@
 # project-specific folders
 data
-*checkpoints
+*checkpoints*
 figures
 
 # Byte-compiled / optimized / DLL files
