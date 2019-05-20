@@ -5,6 +5,10 @@ This folder contains the code to reproduce the models and results from the follo
 Alexander S. Ecker, Fabian H. Sinz, Emmanouil Froudarakis, Paul G. Fahey, Santiago A. Cadena, Edgar Y. Walker, Erick Cobos, Jacob Reimer, Andreas S. Tolias, Matthias Bethge: A rotation-equivariant convolutional neural network model of primary visual cortex. *International Conference on Learning Representations (ICLR 2019)*. https://openreview.net/forum?id=H1fU8iAqKX.
 
 
+### Preparation
+
+Download the checkpoints and data files (`checkpoints.tar.gz.*`) from [Github](https://github.com/aecker/cnn-sys-ident/releases/tag/iclr19-v1.0) and extract them into the folder [analysis/iclr2019/checkpoints](analysis/iclr2019/checkpoints).
+
 ## Reproducing models
 
 If you're just interested in reproducing the various mdoels and baselines described in the paper, check out the Jupyter notebook [models](models.ipynb).
