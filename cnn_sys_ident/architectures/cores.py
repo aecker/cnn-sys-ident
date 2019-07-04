@@ -244,3 +244,179 @@ class StackedRotEquiHermiteConv2dCore:
                         nf_in = nf_out * num_rotations
 
                 self.output = tf.identity(self.conv[-1], name='output')
+
+
+class MultiScanCore:
+    def __init__(self,
+                 base,
+                 data,
+                 inputs,
+                 core_type,
+                 scope='core',
+                 **kwargs):
+        # Make one core per scan (with weight sharing for kernels)
+        self.cores = []
+        for i in range(inputs.shape[0]):
+            self.cores.append(core_type(
+                base, data, inputs[i], reuse=i>0, scope = '{}_{}'.format(scope, i), **kwargs))
+        self.output = [c.output for c in self.cores]
+
+
+class StackedConv3dCore:
+    def __init__(self,
+                 base,
+                 data,
+                 inputs,
+                 filter_size_spatial=[13, 13],
+                 filter_size_temporal=[20, 20],
+                 num_filters=[8, 16],
+                 stride=[1, 1],
+                 rate=[1, 1],
+                 padding=['VALID', 'VALID'],
+                 activation_fn=['elu', 'none'],
+                 rel_smooth_weight=[1, 1],
+                 rel_sparse_weight=[0, 1],
+                 conv_smooth_weight_spatial=0.001,
+                 conv_smooth_weight_temporal=0.001,
+                 conv_sparse_weight=0.001,
+                 scope='core',
+                 reuse=False,
+                 **kwargs):
+        #calculate resulting steps in history that contribute to output
+        self.steps_hist = 1+np.sum(filter_size_temporal)-len(filter_size_temporal)
+        with base.tf_session.graph.as_default():
+            with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
+                self.conv = []
+                self.weights = []
+                x = inputs
+                for i, (fs_s, fs_t, nf, st, rt, pd, fn, sm, sp) in enumerate(
+                    zip(filter_size_spatial, filter_size_temporal, num_filters,
+                        stride, rate, padding, activation_fn, rel_smooth_weight,
+                        rel_sparse_weight)):
+                    bn_params = {'decay': 0.98, 'is_training': base.is_training}
+                    scope = 'conv{}'.format(i)
+                    def reg(w):
+                        penalty = smoothness_regularizer_3d(
+                            w, conv_smooth_weight_spatial * sm,
+                            conv_smooth_weight_temporal * sm)
+                        penalty += group_sparsity_regularizer_3d(
+                            w, conv_sparse_weight * sp)
+                        return penalty
+
+                    x = layers.conv3d(
+                            inputs=x,
+                            num_outputs=int(nf),
+                            kernel_size=[fs_t,fs_s,fs_s],
+                            stride=int(st),
+                            padding=pd,
+                            data_format='NDHWC',
+                            activation_fn=ACTIVATION_FN[fn],
+                            normalizer_fn=layers.batch_norm,
+                            normalizer_params=bn_params,
+                            weights_initializer=tf.truncated_normal_initializer(
+                                mean=0.0, stddev=0.01),
+                            weights_regularizer=reg,
+                            scope=scope
+                            )
+                    with tf.variable_scope(scope, reuse=True):
+                        weights = tf.get_variable('weights')
+                    self.weights.append(weights)
+                    self.conv.append(x)
+
+                self.output = tf.identity(self.conv[-1], name='output')
+
+
+class StackedFactorizedConv3dCore:
+    def __init__(self,
+                 base,
+                 data,
+                 inputs,
+                 filter_size_spatial=[13, 13],
+                 filter_size_temporal=[20, 20],
+                 num_filters=[8, 16],
+                 stride=[1, 1],
+                 rate=[1, 1],
+                 padding=['VALID', 'VALID'],
+                 activation_fn=['elu', 'none'],
+                 rel_smooth_weight=[1, 0],
+                 rel_sparse_weight=[0, 1],
+                 conv_smooth_weight_spatial=0.001,
+                 conv_smooth_weight_temporal=0.001,
+                 conv_sparse_weight=0.001,
+                 scope='core',
+                 reuse=False,
+                 **kwargs):
+        #calculate resulting steps in history that contribute to output
+        self.steps_hist = 1+np.sum(filter_size_temporal)-len(filter_size_temporal)
+        with base.tf_session.graph.as_default():
+            with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
+                self.conv = []
+                self.weights_temporal = []
+                self.weights_spatial = []
+                self.weights_scan_bias = []
+                self.weights_scan_scale = []
+                # Put scans into batch dimension: SBDHWC -> (S*B)DHWC
+                input_list = [i[0] for i in tf.split(inputs, data.input_shape[0])]
+                x = tf.concat(input_list, 0, name = 'put_scan_in_batch')
+                for i, (fs_s, fs_t, nf, st, rt, pd, fn, sm, sp) in enumerate(
+                        zip(filter_size_spatial, filter_size_temporal, num_filters,
+                            stride, rate, padding, activation_fn, rel_smooth_weight,
+                            rel_sparse_weight)):
+                    with tf.variable_scope('conv{}'.format(i), reuse=tf.AUTO_REUSE):
+                        # temporal
+                        #filter: [filter_depth, filter_height, filter_width, in_channels, out_channels]
+                        self.weights_temporal.append(tf.get_variable(
+                                           name='weights_temporal_{}'.format(i),
+                                           shape=[fs_t,1,1,x.shape[-1],int(nf)],
+                                           initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.01)))
+
+                        # spatial
+                        self.weights_spatial.append(tf.get_variable(
+                                          name='weights_spatial_{}'.format(i),
+                                          shape=[1,fs_s,fs_s,x.shape[-1],int(nf)],
+                                          initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.01)))
+
+                    # combined
+                    W_combined = tf.einsum('dabio,chwio->dhwio',
+                                           self.weights_temporal[-1],
+                                           self.weights_spatial[-1],
+                                           name='weights_combined_{}'.format(i)
+                    )
+
+                    # Convolution
+                    x = tf.nn.conv3d(
+                        input=x,
+                        filter=W_combined,
+                        strides=[int(st)]*5,
+                        padding=pd
+                    )
+                    x = tf.contrib.layers.batch_norm(
+                            inputs=x,
+                            decay=0.98,
+                            is_training=base.is_training,
+                        )
+
+                    x = ACTIVATION_FN[fn](x)
+
+                    self.conv.append(x)
+
+                    # regularization
+                    if not(reuse):
+                        reg_loss = group_sparsity_regularizer_3d(
+                                   W_combined,
+                                   conv_sparse_weight * sp
+                        )
+                        reg_loss += smoothness_regularizer_3d(
+                                    W_combined,
+                                    conv_smooth_weight_spatial * sm,
+                                    conv_smooth_weight_temporal * sm
+                        )
+                        tf.losses.add_loss(reg_loss, tf.GraphKeys.REGULARIZATION_LOSSES)
+
+                # split scans into scan wise outputs
+                self.output = tf.split(
+                    self.conv[-1],
+                    len(data.scans),
+                    axis=0,
+                    name='output'
+                )
