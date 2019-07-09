@@ -26,11 +26,11 @@ VAL_CLIP_IDX = list(VAL_CLIP_IDX)
 def load_stimuli(train_movie_file,
                  test_movie_file,
                  random_sequences_file = 'RandomSequences.npy',
-                 downsample = True,
+                 downsample_this = True,
                  downsample_size = 32,
                  STIMULUS_PATH = STIMULUS_PATH):
-    mouse_cam = train_movie_file[:5] == 'mouse'
-
+    #mouse_cam = train_movie_file[:5] == 'mouse'
+    mouse_cam = True
     # train movie
     train_movie_file = os.path.join(STIMULUS_PATH, train_movie_file)
     Train = Image.open(train_movie_file)
@@ -67,7 +67,7 @@ def load_stimuli(train_movie_file,
             i+=1
 
     # downsample
-    if downsample and (original_size != downsample_size):
+    if downsample_this and (original_size != downsample_size):
         movie_train = downsample(movie_train, downsample_size, verbose = True)
         movie_test = downsample(movie_test, downsample_size)
 
