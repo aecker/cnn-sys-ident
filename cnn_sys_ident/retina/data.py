@@ -223,6 +223,9 @@ class Dataset:
             self.movie_val = self.movie_val[:, self.adapt:]
             self.responses_test = self.responses_test[:, self.adapt:]
             self.responses_val = self.responses_val[:, self.adapt:]
+        
+        self.current_chunk_idx = 1e10
+        self.chunk_start_idx = []
 
     def val(self):
         return self.movie_val, self.responses_val
@@ -234,7 +237,7 @@ class Dataset:
         return self.movie_test, self.responses_test
 
     def minibatch(self, batch_size, chunk_size=50):# return one batch
-        if self.current_chunk_idx + batch_size > self.num_chunks:
+        if self.current_chunk_idx + batch_size > len(self.chunk_start_idx): # self.num_chunks:
             self.next_epoch(chunk_size)
         movies, responses = [], []
         for i in range(batch_size):
@@ -251,7 +254,7 @@ class Dataset:
             idx = np.arange(start + shift, start + shift + length+1, chunk_size)
             chunk_start_idx += list(idx[:-1])
         self.chunk_start_idx = np.random.permutation(chunk_start_idx)
-        self.num_chunks = len(chunk_start_idx)
+        # self.num_chunks = len(chunk_start_idx)
         self.current_chunk_idx = 0#beginning of epoch
 
     def STA(self, X,Y): # bad, correlated, dont use

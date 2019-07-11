@@ -15,6 +15,20 @@ ACTIVATION_FN = {
 }
 
 
+def smoothness_regularizer_1d(W, weight=1.0):
+    with tf.variable_scope('smoothness'):
+        lap = tf.constant([-1, 2, -1], shape=(3, 1, 1, 1), dtype=tf.float32)
+        W = tf.expand_dims(W, 1)
+        num_filters = W.get_shape().as_list()[2]
+        W_lap = tf.nn.depthwise_conv2d(tf.transpose(W, perm=[3, 0, 1, 2]),
+                                       tf.tile(lap, [1, 1, num_filters, 1]),
+                                       strides=[1, 1, 1, 1], padding='SAME')
+        penalty = tf.reduce_sum(tf.reduce_sum(tf.square(W_lap), [1, 2, 3]) / \
+                                (1e-8 + tf.reduce_sum(tf.square(W), [0, 1, 2])))
+        penalty = tf.identity(weight * penalty, name='penalty')
+        tf.add_to_collection('smoothness_regularizer_1d', penalty)
+        return penalty
+
 def smoothness_regularizer_2d(W, weight=1.0):
     with tf.variable_scope('smoothness'):
         lap = tf.constant([[0.25, 0.5, 0.25], [0.5, -3.0, 0.5], [0.25, 0.5, 0.25]])
@@ -28,6 +42,31 @@ def smoothness_regularizer_2d(W, weight=1.0):
         penalty = tf.identity(weight * penalty, name='penalty')
         tf.add_to_collection('smoothness_regularizer_2d', penalty)
         return penalty
+    
+def smoothness_regularizer_3d(W, spatial_weight=1.0, temporal_weight=1.0):
+    shape = W.shape
+    penalty = 0
+    if shape[1] > 1 and shape[2] > 1: # spatial kernel
+        for i in range(shape[0]):
+            penalty += smoothness_regularizer_2d(
+                W[i], weight=spatial_weight)
+    if shape[0] > 1: # temporal kernel
+        for i in range(shape[1]):
+            for j in range(shape[2]):
+                penalty += smoothness_regularizer_1d(
+                    W[:,i,j,:,:], weight=temporal_weight)
+    tf.add_to_collection('smoothness_regularizer_3d', penalty)
+    return penalty
+
+def group_sparsity_regularizer_1d(W, weight=1.0):
+    with tf.variable_scope('group_sparsity'):
+        W = tf.expand_dims(W,1)
+        penalty = tf.reduce_sum(
+            tf.reduce_sum(tf.sqrt(tf.reduce_sum(tf.square(W), [0, 1])), 0) / \
+            tf.sqrt(1e-8 + tf.reduce_sum(tf.square(W), [0, 1, 2])))
+        penalty = tf.identity(weight * penalty, name='penalty')
+        tf.add_to_collection('group_sparsity_regularizer_1d', penalty)
+        return penalty
 
 def group_sparsity_regularizer_2d(W, weight=1.0):
     with tf.variable_scope('group_sparsity'):
@@ -37,6 +76,21 @@ def group_sparsity_regularizer_2d(W, weight=1.0):
         penalty = tf.identity(weight * penalty, name='penalty')
         tf.add_to_collection('group_sparsity_regularizer_2d', penalty)
         return penalty
+
+def group_sparsity_regularizer_3d(W, spatial_weight=1.0, temporal_weight=1.0):
+    shape = W.shape
+    penalty = 0
+    if shape[1] > 1 and shape[2] > 1: # spatial kernel
+        for i in range(shape[0]):
+            penalty += group_sparsity_regularizer_2d(
+                W[i], weight=spatial_weight)
+    if shape[0] > 1: # temporal kernel
+        for i in range(shape[1]):
+            for j in range(shape[2]):
+                penalty += group_sparsity_regularizer_1d(
+                    W[:,i,j,:,:], weight=temporal_weight)
+    tf.add_to_collection('group_sparsity_regularizer_3d', penalty)
+    return penalty
 
 
 class StackedConv2dCore:
@@ -356,8 +410,9 @@ class StackedFactorizedConv3dCore:
                 self.weights_scan_bias = []
                 self.weights_scan_scale = []
                 # Put scans into batch dimension: SBDHWC -> (S*B)DHWC
-                input_list = [i[0] for i in tf.split(inputs, data.input_shape[0])]
-                x = tf.concat(input_list, 0, name = 'put_scan_in_batch')
+                # input_list = [i[0] for i in tf.split(inputs, data.input_shape[0])]
+                # x = tf.concat(input_list, 0, name = 'put_scan_in_batch')
+                x = inputs
                 for i, (fs_s, fs_t, nf, st, rt, pd, fn, sm, sp) in enumerate(
                         zip(filter_size_spatial, filter_size_temporal, num_filters,
                             stride, rate, padding, activation_fn, rel_smooth_weight,
@@ -396,7 +451,8 @@ class StackedFactorizedConv3dCore:
                             is_training=base.is_training,
                         )
 
-                    x = ACTIVATION_FN[fn](x)
+                    if not (fn == 'none'):
+                        x = ACTIVATION_FN[fn](x)
 
                     self.conv.append(x)
 
@@ -414,9 +470,10 @@ class StackedFactorizedConv3dCore:
                         tf.losses.add_loss(reg_loss, tf.GraphKeys.REGULARIZATION_LOSSES)
 
                 # split scans into scan wise outputs
-                self.output = tf.split(
-                    self.conv[-1],
-                    len(data.scans),
-                    axis=0,
-                    name='output'
-                )
+                # self.output = tf.split(
+                #     self.conv[-1],
+                #     len(data.scans),
+                #     axis=0,
+                #     name='output'
+                # )
+                self.output = tf.identity(self.conv[-1], name='output')

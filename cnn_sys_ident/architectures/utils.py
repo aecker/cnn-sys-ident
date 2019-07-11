@@ -12,9 +12,18 @@ def inv_soft_threshold(x):
     return np.log(np.exp(x) - 1)
 
 
+def crop_responses(prediction, response):
+    if len(prediction.shape) > 2:
+        # attention: filter_size_temporal - 1 is hardcoded here at the moment
+        # somehow struggeling to set this correctly at runtime
+        response = response[...,19:,:]
+    return(response)
+
+
 def poisson(prediction, response):
+    response = crop_responses(prediction,response)
     return tf.reduce_mean(tf.reduce_sum(
-        prediction - response * tf.log(prediction + 1e-5), 1), name='poisson')
+        prediction - response * tf.log(prediction + 1e-5), -1), name='poisson') # test if -1 instead of 1 breaks sth.
 
 
 def rotate_weights(weights, num_rotations, first_layer=False):

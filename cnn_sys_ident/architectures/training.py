@@ -2,7 +2,7 @@ import tensorflow as tf
 import numpy as np
 from scipy import stats
 
-from .utils import poisson
+from .utils import poisson, crop_responses
 
 
 class Trainer:
@@ -44,6 +44,7 @@ class Trainer:
                                  self.base.responses: res_batch,
                                  self.base.is_training: True,
                                  self.learning_rate: learning_rate}
+                    print('iteration:',iter_num)
                     self.session.run([self.train_step, update_ops], feed_dict)
                     iter_num += 1
 
@@ -79,6 +80,9 @@ class Trainer:
                          self.base.responses: responses,
                          self.base.is_training: False}
             predictions = self.session.run(self.model.predictions, feed_dict)
+        print(predictions.shape,responses.shape)
+        responses = crop_responses(predictions,responses)
+        print(predictions.shape,responses.shape)
         rho = np.zeros(self.data.num_neurons)
         for i, (res, pred) in enumerate(zip(responses.T, predictions.T)):
             if np.std(res) > 1e-5 and np.std(pred) > 1e-5:
@@ -92,6 +96,7 @@ class Trainer:
                          self.base.responses: responses,
                          self.base.is_training: False}
             predictions = self.session.run(self.model.predictions, feed_dict)
+        responses = crop_responses(predictions,responses)
         rho = np.zeros(self.data.num_neurons)
         for i, (res, pred) in enumerate(zip(responses.T, predictions.T)):
             if np.std(res) > 1e-5 and np.std(pred) > 1e-5:

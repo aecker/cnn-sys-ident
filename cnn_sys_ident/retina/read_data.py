@@ -7,11 +7,11 @@ from scipy.interpolate import interp1d
 import datajoint as dj
 
 # Specify repository directory
-repo_directory = "/gpfs01/euler/User/lhoefling/GitHub/datajoint_imaging_V2/"
+repo_directory = "/gpfs01/berens/user/cbehrens/RGC_DNN/datajoint_imaging_V2/"
 # Add repository directory to %PYTHONPATH
 sys.path.insert(0, repo_directory)
 # Load configuration for user
-dj.config.load(repo_directory + "conf/dj_conf_lhoefling.json")
+dj.config.load(repo_directory + "conf/dj_conf_cbehrens.json")
 from schema.imaging_schema import *
 from cnn_sys_ident.retina.data import *
 

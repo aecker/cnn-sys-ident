@@ -61,6 +61,22 @@ class BaseModel:
     def load(self):
         self.tf_session.load()
 
+        
+class BaseModel3D:
+    def __init__(self, data, log_dir=None, log_hash=None):
+        self.tf_session = TFSession(log_dir=log_dir, log_hash=log_hash)
+        self.data = data
+        with self.tf_session.graph.as_default():
+            self.is_training = tf.placeholder(tf.bool, name='is_training')
+            self.inputs = tf.placeholder(tf.float32, shape=data.input_shape, name='inputs')
+            self.responses = tf.placeholder(tf.float32, shape=[None, None, data.num_neurons], name='responses')
+
+    def evaluate(self, var, *args, **kwargs):
+        return self.tf_session.session.run(var, *args, **kwargs)
+
+    def load(self):
+        self.tf_session.load()
+
 
 class CorePlusReadoutModel:
     def __init__(self, base, core, readout):
