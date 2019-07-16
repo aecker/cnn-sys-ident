@@ -320,9 +320,8 @@ class SpatialXFeature3dJointL1Readout:
                  init_masks='sta',
                  scope='readout',
                  reuse=False,
+                 nonlinearity=True,
                  **kwargs):
-        # TO DO: adapt SpatialXFeatureJointL1Readout and simplify SpatialXFeature3dL1Readout
-
         with base.tf_session.graph.as_default():
             with tf.variable_scope(scope, reuse=reuse):
                 # data = base.data
@@ -367,20 +366,26 @@ class SpatialXFeature3dJointL1Readout:
                     self.feature_weights = tf.abs(self.feature_weights, name='positive_feature_weights')
                 self.h = tf.reduce_sum(self.masked * tf.transpose(self.feature_weights), 2)  # 2?
 
-                # L1 regularization for readout layer # verify
+                # L1 regularization for readout layer
                 self.readout_reg = readout_sparsity * tf.reduce_sum(
                     tf.reduce_sum(tf.abs(self.masks), [1, 2]) * \
                     tf.reduce_sum(tf.abs(self.feature_weights), 1))
                 tf.losses.add_loss(self.readout_reg, tf.GraphKeys.REGULARIZATION_LOSSES)
 
-                # bias and output nonlinearity # verify
+                # bias and output nonlinearity
                 _, responses = data.train()
-                bias_init = 0.5 * inv_soft_threshold(responses.mean(axis=0))
+                if nonlinearity:
+                    bias_init = 0.5 * inv_soft_threshold(responses.mean(axis=0))
+                else:
+                    bias_init = - responses.mean(axis=0)
                 self.biases = tf.get_variable(
                     'biases',
                     shape=[num_neurons],
                     initializer=tf.constant_initializer(bias_init))
-                self.output = tf.identity(soft_threshold(self.h + self.biases), name='output')
+                if nonlinearity:
+                    self.output = tf.identity(soft_threshold(self.h + self.biases), name='output')
+                else:
+                    self.output = tf.identity(self.h + self.biases, name='output')
                 
 
 class SpatialXFeature3dL1Readout:

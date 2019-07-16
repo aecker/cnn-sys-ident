@@ -2,12 +2,12 @@ import tensorflow as tf
 import numpy as np
 from scipy import stats
 
-from .utils import poisson, crop_responses
+from .utils import poisson, crop_responses, mean_sq_err
 
 
 class Trainer:
     
-    def __init__(self, base, model):
+    def __init__(self, base, model, error_fn=poisson):
         self.base = base
         self.session = base.tf_session.session
         self.graph = base.tf_session.graph
@@ -15,9 +15,14 @@ class Trainer:
         self.model = model
         with self.graph.as_default():
             self.learning_rate = tf.placeholder(tf.float32, name='learning_rate')
-            self.poisson = poisson(model.predictions, base.responses)
+            # self.poisson = poisson(model.predictions, base.responses)
+            self.print_response = tf.print(base.responses)
+            self.print_prediction = tf.print(model.predictions)
+            with tf.control_dependencies([self.print_response,self.print_prediction]):
+                self.error = error_fn(model.predictions, base.responses)
             self.reg_loss = tf.losses.get_regularization_loss()
-            self.total_loss = self.poisson + self.reg_loss
+            # self.total_loss = self.poisson + self.reg_loss
+            self.total_loss = self.error + self.reg_loss
             self.train_step = tf.train.AdamOptimizer(
                 self.learning_rate).minimize(self.total_loss)
 
@@ -53,7 +58,7 @@ class Trainer:
                         feed_dict_val = {self.base.inputs: inputs_val,
                                          self.base.responses: res_val,
                                          self.base.is_training: False}
-                        loss = self.session.run(self.poisson, feed_dict_val)
+                        loss = self.session.run(self.error, feed_dict_val) # poisson
                         print('{:4d} | Loss: {:.2f}'.format(iter_num, loss))
                         if loss < val_loss:
                             val_loss = loss
@@ -80,9 +85,7 @@ class Trainer:
                          self.base.responses: responses,
                          self.base.is_training: False}
             predictions = self.session.run(self.model.predictions, feed_dict)
-        print(predictions.shape,responses.shape)
         responses = crop_responses(predictions,responses)
-        print(predictions.shape,responses.shape)
         rho = np.zeros(self.data.num_neurons)
         for i, (res, pred) in enumerate(zip(responses.T, predictions.T)):
             if np.std(res) > 1e-5 and np.std(pred) > 1e-5:
