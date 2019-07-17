@@ -34,7 +34,7 @@ class MultiDatasetWrapper:
 
         return data_interp
 
-    def generate_dataset(self):
+    def generate_dataset(self, filter_traces=False):
         key = self.key
         stim_path = self.stim_path
         if key["experimenter"] == "Franke":
@@ -93,6 +93,8 @@ class MultiDatasetWrapper:
                                      depths,
                                      movies=movies,
                                      group=False)
+                                     group=False,
+                                     filter_traces=filter_traces)
         self.multi_dataset = multi_dataset
 
 

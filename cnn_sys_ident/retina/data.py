@@ -99,7 +99,8 @@ class Dataset:
                  movie_ordering,
                  responses, # ND
                  adapt = 0, # how many frames to discard from each clip / beginning of test to ignore adaptation
-                 snr_tresh = - np.inf
+                 snr_tresh = - np.inf,
+                 filter_traces=False
                 ):
         #some init variabels
         self.num_train_samples, self.px_y, self.px_x, self.channels = movie_train.shape
@@ -122,13 +123,16 @@ class Dataset:
                                                           responses[roi,64*self.clip_length:118*self.clip_length]))
 
         # preprocess responses (min=0, SD=1) per ROI
-        if scan_frequency is not None:
-            temp_train = self.butter_highpass_filter(self.responses_train, 
+        if filter_traces:
+            temp_train = self.butter_highpass_filter(self.responses_train,
                                                      cutoff=0.01,
                                                      fs=30)
-            temp_test = self.butter_highpass_filter(self.responses_test, 
+            temp_test = self.butter_highpass_filter(self.responses_test,
                                                      cutoff=0.01,
                                                      fs=30)
+        else:
+            temp_train = self.responses_train
+            temp_test = self.responses_test
         m = np.min(temp_train, 0)
         sd = np.std(temp_train, 0) + 1e-8
         zscore = lambda img: (img - m) / sd
@@ -308,7 +312,8 @@ class MultiDataset:
                  snr_thresh = -np.inf,
                  scan_in_batch = False,
                  group = False,
-                 downsample_size = 32):
+                 downsample_size = 32,
+                 filter_traces=False):
         self.responses = responses
         self.num_rois = num_rois
         self.num_scans = num_scans
@@ -353,7 +358,8 @@ class MultiDataset:
                     self.scans.append(Dataset(self.movie_train, self.movie_test,
                                               self.random_sequences[:, rand_seq],
                                               self.grouped_responses[-1],
-                                              adapt, snr_thresh))
+                                              adapt, snr_thresh,
+                                              filter_traces=filter_traces))
                     self.grouped_depths[-1] = np.concatenate(self.grouped_depths[-1])[self.scans[-1].snr_ind]
             self.depths = np.concatenate(self.grouped_depths)
         else: # One feed per scan (required for scan specific correction)
