@@ -12,6 +12,7 @@ import sys
 from datetime import datetime 
 import tensorflow as tf
 from scipy import stats
+from scipy.signal import butter, filtfilt
 
 STIMULUS_PATH = '/gpfs01/euler/data/Resources/Stimulus/natural_movies/'
 
@@ -120,12 +121,19 @@ class Dataset:
             self.responses_train[:,roi] = np.concatenate((responses[roi,5*self.clip_length:59*self.clip_length],
                                                           responses[roi,64*self.clip_length:118*self.clip_length]))
 
-        # preprocess responses (mean=0, SD=1) per ROI
-        m = np.median(self.responses_train, 0)
-        sd = np.std(self.responses_train, 0) + 1e-8
+        # preprocess responses (min=0, SD=1) per ROI
+        if scan_frequency is not None:
+            temp_train = self.butter_highpass_filter(self.responses_train, 
+                                                     cutoff=0.01,
+                                                     fs=30)
+            temp_test = self.butter_highpass_filter(self.responses_test, 
+                                                     cutoff=0.01,
+                                                     fs=30)
+        m = np.min(temp_train, 0)
+        sd = np.std(temp_train, 0) + 1e-8
         zscore = lambda img: (img - m) / sd
-        self.responses_train = zscore(self.responses_train)
-        self.responses_test = zscore(self.responses_test)
+        self.responses_train = zscore(temp_train)
+        self.responses_test = zscore(temp_test)
         self.test_responses_by_trial = zscore(np.array(self.test_responses_by_trial).T).T # NRD
 
         # measure oracle (test set correlation each with remaining n-1, averaged)
@@ -274,6 +282,17 @@ class Dataset:
             sta_space[roi] = D[0,:].reshape([self.px_y,self.px_x])
             sta_time[roi] = S[:,0]
         return sta_space, sta_time
+    
+    def butter_highpass(self, cutoff, fs, order=5):
+        nyq = 0.5 * fs
+        normal_cutoff = cutoff / nyq
+        b, a = butter(order, normal_cutoff, btype='high', analog=False)
+        return b, a
+
+    def butter_highpass_filter(self, data, cutoff, fs, order=5, axis=0):
+        b, a = self.butter_highpass(cutoff, fs, order=order)
+        y = filtfilt(b, a, data, axis)
+        return y
 
 class MultiDataset:
     def __init__(self,
