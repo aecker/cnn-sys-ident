@@ -34,7 +34,7 @@ class MultiDatasetWrapper:
 
         return data_interp
 
-    def generate_dataset(self, filter_traces=False):
+    def generate_dataset(self, filter_traces=False, quality_threshold=0):
         key = self.key
         stim_path = self.stim_path
         if key["experimenter"] == "Franke":
@@ -63,6 +63,8 @@ class MultiDatasetWrapper:
         for i, f in enumerate(fields):
             keys_field[i].update(key)
             keys_field[i].update(dict(field_id=f))
+            qual_idxs = \
+                (MovieQI() & keys_field[i]).fetch("movie_qi")
             traces = \
                 (Traces() * Presentation() & keys_field[i]).fetch("traces")
             tracestimes = \
@@ -74,13 +76,14 @@ class MultiDatasetWrapper:
             upsampled_triggertimes = np.concatenate(upsampled_triggertimes)
             num_neurons = len(traces)
             responses = np.zeros((num_neurons, 150 * 123))
+            quality_mask = qual_idxs > quality_threshold
             for n in range(num_neurons):
                 responses[n, :] = \
                     self.interpolate_weights(tracestimes[n],
                                              traces[n],
                                              upsampled_triggertimes)
-            responses_all[i] = responses
-            num_rois_all[i] = num_neurons
+            responses_all[i] = responses[quality_mask]
+            num_rois_all[i] = len(qual_idxs[quality_mask])
             depths = [np.zeros(num_rois_all[i]) for i in range(len(fields))]
             movies = movie_train, movie_test, random_sequences
 
@@ -92,7 +95,6 @@ class MultiDatasetWrapper:
                                      restriction,
                                      depths,
                                      movies=movies,
-                                     group=False)
                                      group=False,
                                      filter_traces=filter_traces)
         self.multi_dataset = multi_dataset
