@@ -316,7 +316,8 @@ class SpatialXFeature3dJointL1Readout:
                  data,
                  inputs,
                  positive_feature_weights=False,
-                 readout_sparsity=0.02,
+                 mask_sparsity=0.01,
+                 feature_sparsity=0.001,
                  init_masks='sta',
                  scope='readout',
                  reuse=False,
@@ -367,9 +368,9 @@ class SpatialXFeature3dJointL1Readout:
                 self.h = tf.reduce_sum(self.masked * tf.transpose(self.feature_weights), 2)  # 2?
 
                 # L1 regularization for readout layer
-                self.readout_reg = readout_sparsity * tf.reduce_sum(
-                    tf.reduce_sum(tf.abs(self.masks), [1, 2]) * \
-                    tf.reduce_sum(tf.abs(self.feature_weights), 1))
+                self.mask_reg = mask_sparsity * tf.reduce_mean(tf.abs(self.masks))
+                self.feature_reg = feature_sparsity * tf.reduce_mean(tf.abs(self.feature_weights))
+                self.readout_reg = self.mask_reg + self.feature_reg
                 tf.losses.add_loss(self.readout_reg, tf.GraphKeys.REGULARIZATION_LOSSES)
 
                 # bias and output nonlinearity

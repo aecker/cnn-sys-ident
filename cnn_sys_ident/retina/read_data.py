@@ -14,6 +14,7 @@ sys.path.insert(0, repo_directory)
 dj.config.load(repo_directory + "conf/dj_conf_cbehrens.json")
 from schema.imaging_schema import *
 from cnn_sys_ident.retina.data import *
+from schema.stimulus_schema import MovieQI
 
 
 # %%

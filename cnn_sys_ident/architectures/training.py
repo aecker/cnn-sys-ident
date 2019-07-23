@@ -16,10 +16,7 @@ class Trainer:
         with self.graph.as_default():
             self.learning_rate = tf.placeholder(tf.float32, name='learning_rate')
             # self.poisson = poisson(model.predictions, base.responses)
-            self.print_response = tf.print(base.responses)
-            self.print_prediction = tf.print(model.predictions)
-            with tf.control_dependencies([self.print_response,self.print_prediction]):
-                self.error = error_fn(model.predictions, base.responses)
+            self.error = error_fn(model.predictions, base.responses)
             self.reg_loss = tf.losses.get_regularization_loss()
             # self.total_loss = self.poisson + self.reg_loss
             self.total_loss = self.error + self.reg_loss
@@ -64,6 +61,11 @@ class Trainer:
                             val_loss = loss
                             self.base.tf_session.save()
                             not_improved = 0
+                        elif np.isnan(loss):
+                            self.base.tf_session.load()
+                            iter_num -= not_improved * val_steps
+                            not_improved = 0
+                            break
                         else:
                             not_improved += 1
                         if not_improved == patience:
