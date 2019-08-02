@@ -22,6 +22,8 @@ class Trainer:
             self.total_loss = self.error + self.reg_loss
             self.train_step = tf.train.AdamOptimizer(
                 self.learning_rate).minimize(self.total_loss)
+            writer = tf.summary.FileWriter(logdir=self.base.tf_session.log_dir, graph=self.graph)
+            writer.flush()
 
     def fit(self,
             max_iter=10000,
@@ -29,7 +31,8 @@ class Trainer:
             batch_size=256,
             val_steps=100,
             patience=5,
-            lr_decay_steps=2):
+            lr_decay_steps=2,
+            callback=None):
         with self.graph.as_default():
             update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
             inputs_val, res_val = self.data.val()
@@ -57,13 +60,15 @@ class Trainer:
                                          self.base.is_training: False}
                         loss = self.session.run(self.error, feed_dict_val) # poisson
                         print('{:4d} | Loss: {:.2f}'.format(iter_num, loss))
+                        if callback is not None:
+                            callback(self.session, feed_dict)
                         if loss < val_loss:
                             val_loss = loss
                             self.base.tf_session.save()
                             not_improved = 0
                         elif np.isnan(loss):
                             self.base.tf_session.load()
-                            iter_num -= not_improved * val_steps
+                            iter_num -= (not_improved + 1) * val_steps
                             not_improved = 0
                             break
                         else:
