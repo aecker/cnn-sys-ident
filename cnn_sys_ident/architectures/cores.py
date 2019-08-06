@@ -311,8 +311,10 @@ class MultiScanCore:
         # Make one core per scan (with weight sharing for kernels)
         self.cores = []
         for i in range(inputs.shape[0]):
+#             self.cores.append(core_type(
+#                 base, data, inputs[i], reuse=i>0, scope = '{}_{}'.format(scope, i), **kwargs))
             self.cores.append(core_type(
-                base, data, inputs[i], reuse=i>0, scope = '{}_{}'.format(scope, i), **kwargs))
+                base, data, inputs[i], reuse=i>0, scope = scope, **kwargs))
         self.output = [c.output for c in self.cores]
 
 
@@ -458,16 +460,23 @@ class StackedFactorizedConv3dCore:
 
                     # regularization
                     if not(reuse):
-                        reg_loss = group_sparsity_regularizer_3d(
-                                   W_combined,
+                        self.reg_loss = group_sparsity_regularizer_1d(
+                                   self.weights_temporal[-1][:,0,0,:,:],
                                    conv_sparse_weight * sp
                         )
-                        reg_loss += smoothness_regularizer_3d(
-                                    W_combined,
-                                    conv_smooth_weight_spatial * sm,
+                        self.reg_loss += group_sparsity_regularizer_2d(
+                                    self.weights_spatial[-1][0,:,:,:,:],
+                                    conv_sparse_weight * sp
+                        )
+                        self.reg_loss += smoothness_regularizer_1d(
+                                    self.weights_temporal[-1][:,0,0,:,:],
                                     conv_smooth_weight_temporal * sm
                         )
-                        tf.losses.add_loss(reg_loss, tf.GraphKeys.REGULARIZATION_LOSSES)
+                        self.reg_loss += smoothness_regularizer_2d(
+                                    self.weights_spatial[-1][0,:,:,:,:],
+                                    conv_smooth_weight_spatial * sm
+                        )
+                        tf.losses.add_loss(self.reg_loss, tf.GraphKeys.REGULARIZATION_LOSSES)
 
                 # split scans into scan wise outputs
                 # self.output = tf.split(

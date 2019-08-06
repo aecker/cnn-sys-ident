@@ -316,7 +316,8 @@ class SpatialXFeature3dJointL1Readout:
                  data,
                  inputs,
                  positive_feature_weights=False,
-                 readout_sparsity=0.02,
+                 mask_sparsity=0.01,
+                 feature_sparsity=0.001,
                  init_masks='sta',
                  scope='readout',
                  reuse=False,
@@ -326,9 +327,6 @@ class SpatialXFeature3dJointL1Readout:
             with tf.variable_scope(scope, reuse=reuse):
                 # data = base.data
                 _, _, num_px_y, num_px_x, num_features = inputs.shape.as_list()
-                # Here we have a problem at the moment:
-                # num_neurons is the total amount of neurons over all scans. 
-                # num_rois is per scan, but inside this function scan number is not known
                 num_neurons = data.num_neurons
                 
                 # masks
@@ -367,9 +365,10 @@ class SpatialXFeature3dJointL1Readout:
                 self.h = tf.reduce_sum(self.masked * tf.transpose(self.feature_weights), 2)  # 2?
 
                 # L1 regularization for readout layer
-                self.readout_reg = readout_sparsity * tf.reduce_sum(
-                    tf.reduce_sum(tf.abs(self.masks), [1, 2]) * \
-                    tf.reduce_sum(tf.abs(self.feature_weights), 1))
+                # summed, scales with neurons <<<< YOU WANT THIS!!!
+                self.mask_reg = mask_sparsity * tf.reduce_sum(tf.abs(self.masks))
+                self.feature_reg = feature_sparsity * tf.reduce_sum(tf.abs(self.feature_weights))
+                self.readout_reg = self.mask_reg + self.feature_reg
                 tf.losses.add_loss(self.readout_reg, tf.GraphKeys.REGULARIZATION_LOSSES)
 
                 # bias and output nonlinearity
@@ -474,12 +473,12 @@ class SpatialXFeature3dL1Readout:
                     name='output')
 
                 # L1 regularization for masks and feature weights
-                # summed, scales with neurons
-                # self.mask_reg = mask_sparsity * tf.reduce_sum(tf.abs(self.masks))
-                # self.feature_reg = feature_sparsity * tf.reduce_sum(tf.abs(self.feature_weights))
+                # summed, scales with neurons <<<< YOU WANT THIS!!!
+                self.mask_reg = mask_sparsity * tf.reduce_sum(tf.abs(self.masks))
+                self.feature_reg = feature_sparsity * tf.reduce_sum(tf.abs(self.feature_weights))
                 # mean, doesnt scale with neurons
-                self.mask_reg = mask_sparsity * tf.reduce_mean(tf.abs(self.masks))
-                self.feature_reg = feature_sparsity * tf.reduce_mean(tf.abs(self.feature_weights))
+                #self.mask_reg = mask_sparsity * tf.reduce_mean(tf.abs(self.masks))
+                #self.feature_reg = feature_sparsity * tf.reduce_mean(tf.abs(self.feature_weights))
                 self.readout_reg = self.mask_reg + self.feature_reg
 
                 #spread (weights across all channels)
@@ -537,7 +536,6 @@ class MultiScanReadout:
         # readout_position = np.zeros(len(inputs)+1,dtype=int)
         # readout_position[1:] = np.cumsum(data.num_rois)
         self.output = tf.concat([r.output for r in self.readouts], axis=2) # VERIFY
-        # for now and for compatibility reasons: extract slice from readouts at this point
-        #self.output = tf.concat([self.readouts[i].output[:,:,readout_position[i]:readout_position[i+1]] for i in range(len(inputs))], axis=2) # VERIFY
+
 
 

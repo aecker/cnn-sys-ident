@@ -16,6 +16,7 @@ dj.config.load(repo_directory + "conf/dj_conf_cbehrens.json")
 from schema.imaging_schema import *
 from schema.stimulus_schema import MovieQI, PreprocTraces, ChirpQI, OsDsIndexes
 from cnn_sys_ident.retina.data import *
+from schema.stimulus_schema import MovieQI
 
 
 # %%
