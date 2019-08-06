@@ -3,6 +3,7 @@ import os
 import sys
 import numpy as np
 import re
+from copy import deepcopy
 from scipy.interpolate import interp1d
 import datajoint as dj
 
@@ -13,6 +14,7 @@ sys.path.insert(0, repo_directory)
 # Load configuration for user
 dj.config.load(repo_directory + "conf/dj_conf_cbehrens.json")
 from schema.imaging_schema import *
+from schema.stimulus_schema import MovieQI, PreprocTraces, ChirpQI, OsDsIndexes
 from cnn_sys_ident.retina.data import *
 
 
@@ -34,14 +36,23 @@ class MultiDatasetWrapper:
 
         return data_interp
 
-    def generate_dataset(self, filter_traces=False, quality_threshold=0):
+    def generate_dataset(self,
+                         filter_traces=False,
+                         quality_threshold_movie=0,
+                         quality_threshold_chirp=0,
+                         quality_threshold_ds=0):
         key = self.key
         stim_path = self.stim_path
-        if key["experimenter"] == "Franke":
+        projname = (ExpInfo() & key).fetch1('projname')
+        if projname.find("RGC") >= 0:
             hn = (Experiment() & key).fetch1("headername")
             eye = re.search("__(.+?).ini", hn).group(1)
             stim_path = stim_path + eye + "/"
-
+        elif projname.find("BC") >= 0:
+            stim_path = stim_path
+        else:
+            raise Exception('Cannot identify stimulus location '
+                            'for experiment from project ' + projname)
         movie_train, movie_test, random_sequences = \
             load_stimuli("Train_joined.tif",
                          "Test_joined.tif",
@@ -63,10 +74,21 @@ class MultiDatasetWrapper:
         for i, f in enumerate(fields):
             keys_field[i].update(key)
             keys_field[i].update(dict(field_id=f))
-            qual_idxs = \
+            qual_idxs_movie = \
                 (MovieQI() & keys_field[i]).fetch("movie_qi")
-            traces = \
-                (Traces() * Presentation() & keys_field[i]).fetch("traces")
+            temp_key = deepcopy(keys_field[i])
+            temp_key.pop("stim_id")
+            qual_idxs_chirp = \
+                (ChirpQI() & temp_key).fetch("chirp_qi")
+            qual_idxs_ds = \
+                (OsDsIndexes() & temp_key).fetch("d_qi")
+            if filter_traces:
+                traces = \
+                    (PreprocTraces() * Presentation() &
+                     keys_field[i]).fetch("preproc_traces")
+            else:
+                traces = \
+                    (Traces() * Presentation() & keys_field[i]).fetch("traces")
             tracestimes = \
                 (Traces() * Presentation() & keys_field[i]).fetch("traces_times")
             triggertimes = \
@@ -75,15 +97,24 @@ class MultiDatasetWrapper:
                 [np.linspace(t, t + 4.9666667, 5 * 30) for t in triggertimes]
             upsampled_triggertimes = np.concatenate(upsampled_triggertimes)
             num_neurons = len(traces)
+            assert num_neurons == len(qual_idxs_movie), \
+                "Number of neurons and movie quality indexes not the same"
+            assert num_neurons == len(qual_idxs_chirp), \
+                "Number of neurons and chirp quality indexes not the same"
+            assert num_neurons == len(qual_idxs_ds), \
+                "Number of neurons and ds quality indexes not the same"
             responses = np.zeros((num_neurons, 150 * 123))
-            quality_mask = qual_idxs > quality_threshold
+            quality_mask = np.logical_and(
+                (qual_idxs_movie > quality_threshold_movie),
+                np.logical_and((qual_idxs_chirp > quality_threshold_chirp),
+                               (qual_idxs_ds > quality_threshold_ds)))
             for n in range(num_neurons):
                 responses[n, :] = \
                     self.interpolate_weights(tracestimes[n],
                                              traces[n],
                                              upsampled_triggertimes)
             responses_all[i] = responses[quality_mask]
-            num_rois_all[i] = len(qual_idxs[quality_mask])
+            num_rois_all[i] = len(qual_idxs_movie[quality_mask])
             depths = [np.zeros(num_rois_all[i]) for i in range(len(fields))]
             movies = movie_train, movie_test, random_sequences
 
@@ -95,8 +126,7 @@ class MultiDatasetWrapper:
                                      restriction,
                                      depths,
                                      movies=movies,
-                                     group=False,
-                                     filter_traces=filter_traces)
+                                     group=False)
         self.multi_dataset = multi_dataset
 
 

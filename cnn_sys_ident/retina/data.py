@@ -121,25 +121,7 @@ class Dataset:
             self.responses_test[:,roi] = np.mean(tmp,0)
             self.responses_train[:,roi] = np.concatenate((responses[roi,5*self.clip_length:59*self.clip_length],
                                                           responses[roi,64*self.clip_length:118*self.clip_length]))
-
-        # preprocess responses (min=0, SD=1) per ROI
-        if filter_traces:
-            temp_train = self.butter_highpass_filter(self.responses_train,
-                                                     cutoff=0.01,
-                                                     fs=30)
-            temp_test = self.butter_highpass_filter(self.responses_test,
-                                                     cutoff=0.01,
-                                                     fs=30)
-        else:
-            temp_train = self.responses_train
-            temp_test = self.responses_test
-        m = np.min(temp_train, 0)
-        sd = np.std(temp_train, 0) + 1e-8
-        zscore = lambda img: (img - m) / sd
-        self.responses_train = zscore(temp_train)
-        self.responses_test = zscore(temp_test)
-        self.test_responses_by_trial = zscore(np.array(self.test_responses_by_trial).T).T # NRD
-
+        self.test_responses_by_trial = np.asarray(self.test_responses_by_trial)
         # measure oracle (test set correlation each with remaining n-1, averaged)
         self.test_responses_for_oracle = np.zeros_like(self.test_responses_by_trial)
         self.oracle = np.zeros((self.num_neurons, 3))
@@ -286,17 +268,6 @@ class Dataset:
             sta_space[roi] = D[0,:].reshape([self.px_y,self.px_x])
             sta_time[roi] = S[:,0]
         return sta_space, sta_time
-    
-    def butter_highpass(self, cutoff, fs, order=5):
-        nyq = 0.5 * fs
-        normal_cutoff = cutoff / nyq
-        b, a = butter(order, normal_cutoff, btype='high', analog=False)
-        return b, a
-
-    def butter_highpass_filter(self, data, cutoff, fs, order=5, axis=0):
-        b, a = self.butter_highpass(cutoff, fs, order=order)
-        y = filtfilt(b, a, data, axis)
-        return y
 
 class MultiDataset:
     def __init__(self,
@@ -312,8 +283,7 @@ class MultiDataset:
                  snr_thresh = -np.inf,
                  scan_in_batch = False,
                  group = False,
-                 downsample_size = 32,
-                 filter_traces=False):
+                 downsample_size = 32):
         self.responses = responses
         self.num_rois = num_rois
         self.num_scans = num_scans
@@ -358,8 +328,7 @@ class MultiDataset:
                     self.scans.append(Dataset(self.movie_train, self.movie_test,
                                               self.random_sequences[:, rand_seq],
                                               self.grouped_responses[-1],
-                                              adapt, snr_thresh,
-                                              filter_traces=filter_traces))
+                                              adapt, snr_thresh))
                     self.grouped_depths[-1] = np.concatenate(self.grouped_depths[-1])[self.scans[-1].snr_ind]
             self.depths = np.concatenate(self.grouped_depths)
         else: # One feed per scan (required for scan specific correction)
