@@ -14,7 +14,8 @@ sys.path.insert(0, repo_directory)
 # Load configuration for user
 dj.config.load(repo_directory + "conf/dj_conf_cbehrens.json")
 from schema.imaging_schema import *
-from schema.stimulus_schema import MovieQI, PreprocTraces, ChirpQI, OsDsIndexes
+from schema.stimulus_schema import MovieQI, PreprocTraces, ChirpQI, OsDsIndexes,\
+    PreprocParams
 from cnn_sys_ident.retina.data import *
 from schema.stimulus_schema import MovieQI
 
@@ -39,6 +40,7 @@ class MultiDatasetWrapper:
 
     def generate_dataset(self,
                          filter_traces=False,
+                         preproc_param_set_id = None,
                          quality_threshold_movie=0,
                          quality_threshold_chirp=0,
                          quality_threshold_ds=0):
@@ -84,9 +86,31 @@ class MultiDatasetWrapper:
             qual_idxs_ds = \
                 (OsDsIndexes() & temp_key).fetch("d_qi")
             if filter_traces:
+                if i == 0:
+                    preproc_param_key = 'preproc_param_set_id = {}'.format(
+                        preproc_param_set_id
+                    )
+                    ff_ = (PreprocParams() & preproc_param_key).fetch1('cutoff')
+                    nn_ = (PreprocParams() & preproc_param_key).fetch1('non_negative')
+                    bs_ = (PreprocParams() & preproc_param_key).fetch1('subtract_baseline')
+                    bd_ = (PreprocParams() & preproc_param_key).fetch1('standardize')
+                    print('Loading traces preprocessed with the following settings: '
+                          'Filter frequencey : {}, non-negative: {}, '
+                          'baseline subtracted: {}, standardized: {}'.format(
+                        ff_, nn_, bs_, bd_
+                    ))
                 traces = \
                     (PreprocTraces() * Presentation() &
-                     keys_field[i]).fetch("preproc_traces")
+                     keys_field[i] & preproc_param_key).fetch("preproc_traces")
+                raw_traces = \
+                    (Traces() * Presentation() &
+                     keys_field[i]).fetch("traces")
+                assert len(traces) == len(raw_traces), \
+                    "Number of ROIs returned for raw traces is not the " \
+                    "same as number of ROIs returned for preproc traces. You " \
+                    "need to populate PreprocTraces() with the desired preproc " \
+                    "settings."\
+
             else:
                 traces = \
                     (Traces() * Presentation() & keys_field[i]).fetch("traces")
