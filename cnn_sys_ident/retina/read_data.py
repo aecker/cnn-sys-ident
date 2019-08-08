@@ -6,6 +6,7 @@ import re
 from copy import deepcopy
 from scipy.interpolate import interp1d
 import datajoint as dj
+import warnings
 
 # Specify repository directory
 repo_directory = "/gpfs01/berens/user/cbehrens/RGC_DNN/datajoint_imaging_V2/"
@@ -39,11 +40,31 @@ class MultiDatasetWrapper:
         return data_interp
 
     def generate_dataset(self,
-                         filter_traces=False,
-                         preproc_param_set_id = None,
+                         filter_traces=True,
+                         preproc_param_set_id=2,
                          quality_threshold_movie=0,
                          quality_threshold_chirp=0,
                          quality_threshold_ds=0):
+        if filter_traces:
+            preproc_param_key = 'preproc_param_set_id = {}'.format(
+                preproc_param_set_id
+            )
+            ff_ = (PreprocParams() & preproc_param_key).fetch1('cutoff')
+            nn_ = (PreprocParams() & preproc_param_key).fetch1('non_negative')
+            bs_ = (PreprocParams() & preproc_param_key).fetch1('subtract_baseline')
+            bd_ = (PreprocParams() & preproc_param_key).fetch1('standardize')
+            print('Loading traces preprocessed with the following settings: '
+                  'Filter frequencey : {}, non-negative: {}, '
+                  'baseline subtracted: {}, standardized: {}'.format(
+                ff_, nn_, bs_, bd_
+            ))
+        else:
+            warnings.warn("You are retrieving raw traces, but quality indexes "
+                          "are returned based on traces preprocessed with "
+                          "settings preproc_param_set_id = {}".format(
+                preproc_param_set_id
+            ))
+            preproc_param_key = 'preproc_param_set_id = 1'
         key = self.key
         stim_path = self.stim_path
         projname = (ExpInfo() & key).fetch1('projname')
@@ -78,27 +99,15 @@ class MultiDatasetWrapper:
             keys_field[i].update(key)
             keys_field[i].update(dict(field_id=f))
             qual_idxs_movie = \
-                (MovieQI() & keys_field[i]).fetch("movie_qi")
+                (MovieQI() & keys_field[i] &
+                 preproc_param_key).fetch("movie_qi")
             temp_key = deepcopy(keys_field[i])
             temp_key.pop("stim_id")
             qual_idxs_chirp = \
-                (ChirpQI() & temp_key).fetch("chirp_qi")
+                (ChirpQI() & temp_key & 'preproc_param_set_id=1').fetch("chirp_qi")
             qual_idxs_ds = \
-                (OsDsIndexes() & temp_key).fetch("d_qi")
+                (OsDsIndexes() & temp_key & 'preproc_param_set_id=1').fetch("d_qi")
             if filter_traces:
-                if i == 0:
-                    preproc_param_key = 'preproc_param_set_id = {}'.format(
-                        preproc_param_set_id
-                    )
-                    ff_ = (PreprocParams() & preproc_param_key).fetch1('cutoff')
-                    nn_ = (PreprocParams() & preproc_param_key).fetch1('non_negative')
-                    bs_ = (PreprocParams() & preproc_param_key).fetch1('subtract_baseline')
-                    bd_ = (PreprocParams() & preproc_param_key).fetch1('standardize')
-                    print('Loading traces preprocessed with the following settings: '
-                          'Filter frequencey : {}, non-negative: {}, '
-                          'baseline subtracted: {}, standardized: {}'.format(
-                        ff_, nn_, bs_, bd_
-                    ))
                 traces = \
                     (PreprocTraces() * Presentation() &
                      keys_field[i] & preproc_param_key).fetch("preproc_traces")
