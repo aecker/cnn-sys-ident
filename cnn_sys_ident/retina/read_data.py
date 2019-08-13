@@ -9,11 +9,11 @@ import datajoint as dj
 import warnings
 
 # Specify repository directory
-repo_directory = "/gpfs01/euler/User/lhoefling/GitHub/datajoint_imaging_V2/"
+repo_directory = "/gpfs01/berens/user/cbehrens/RGC_DNN/datajoint_imaging_V2/"
 # Add repository directory to %PYTHONPATH
 sys.path.insert(0, repo_directory)
 # Load configuration for user
-dj.config.load(repo_directory + "conf/dj_conf_lhoefling.json")
+dj.config.load(repo_directory + "conf/dj_conf_cbehrens.json")
 from schema.imaging_schema import *
 from schema.stimulus_schema import MovieQI, PreprocTraces, ChirpQI, OsDsIndexes,\
     PreprocParams
