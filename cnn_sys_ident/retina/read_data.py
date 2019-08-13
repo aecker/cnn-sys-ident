@@ -98,15 +98,18 @@ class MultiDatasetWrapper:
         for i, f in enumerate(fields):
             keys_field[i].update(key)
             keys_field[i].update(dict(field_id=f))
-            qual_idxs_movie = \
-                (MovieQI() & keys_field[i] &
-                 preproc_param_key).fetch("movie_qi")
+            if quality_threshold_movie > 0:
+                qual_idxs_movie = \
+                    (MovieQI() & keys_field[i] &
+                     preproc_param_key).fetch("movie_qi")
             temp_key = deepcopy(keys_field[i])
             temp_key.pop("stim_id")
-            qual_idxs_chirp = \
-                (ChirpQI() & temp_key & 'preproc_param_set_id=1').fetch("chirp_qi")
-            qual_idxs_ds = \
-                (OsDsIndexes() & temp_key & 'preproc_param_set_id=1').fetch("d_qi")
+            if quality_threshold_chirp > 0:
+                qual_idxs_chirp = \
+                    (ChirpQI() & temp_key & 'preproc_param_set_id=1').fetch("chirp_qi")
+            if quality_threshold_ds > 0:
+                qual_idxs_ds = \
+                    (OsDsIndexes() & temp_key & 'preproc_param_set_id=1').fetch("d_qi")
             if filter_traces:
                 traces = \
                     (PreprocTraces() * Presentation() &
@@ -131,17 +134,25 @@ class MultiDatasetWrapper:
                 [np.linspace(t, t + 4.9666667, 5 * 30) for t in triggertimes]
             upsampled_triggertimes = np.concatenate(upsampled_triggertimes)
             num_neurons = len(traces)
-            assert num_neurons == len(qual_idxs_movie), \
-                "Number of neurons and movie quality indexes not the same"
-            assert num_neurons == len(qual_idxs_chirp), \
-                "Number of neurons and chirp quality indexes not the same"
-            assert num_neurons == len(qual_idxs_ds), \
-                "Number of neurons and ds quality indexes not the same"
+            if quality_threshold_movie > 0:
+                assert num_neurons == len(qual_idxs_movie), \
+                    "Number of neurons and movie quality indexes not the same"
+            if quality_threshold_chirp > 0:
+                assert num_neurons == len(qual_idxs_chirp), \
+                    "Number of neurons and chirp quality indexes not the same"
+            if quality_threshold_ds > 0:
+                assert num_neurons == len(qual_idxs_ds), \
+                    "Number of neurons and ds quality indexes not the same"
             responses = np.zeros((num_neurons, 150 * 123))
-            quality_mask = np.logical_and(
-                (qual_idxs_movie > quality_threshold_movie),
-                np.logical_and((qual_idxs_chirp > quality_threshold_chirp),
-                               (qual_idxs_ds > quality_threshold_ds)))
+            if (quality_threshold_chirp <= 0) and (quality_threshold_ds <= 0):
+                #quality_mask = np.logical_and(
+                #    (qual_idxs_movie > quality_threshold_movie),
+                #    np.logical_and((qual_idxs_chirp > quality_threshold_chirp),
+                #                   (qual_idxs_ds > quality_threshold_ds)))
+                quality_mask = qual_idxs_movie > quality_threshold_movie
+            else:
+                warnings.warn("You are trying to apply chirp and ds quality thresholds, which are not implemented")
+                quality_mask = np.ones_like(responses, dtype=bool)
             for n in range(num_neurons):
                 responses[n, :] = \
                     self.interpolate_weights(tracestimes[n],
