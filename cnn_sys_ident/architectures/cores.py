@@ -434,24 +434,29 @@ class StackedFactorizedConv3dCore:
                                           initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.01)))
 
                     # combined
-                    W_combined = tf.einsum('dabio,chwio->dhwio',
+                    self.W_combined = tf.einsum('dabio,chwio->dhwio',
                                            self.weights_temporal[-1],
                                            self.weights_spatial[-1],
                                            name='weights_combined_{}'.format(i)
                     )
+                    
+                    weights_mean=tf.math.reduce_mean(self.W_combined,axis=[0,1,2,3])
+                    self.W_combined = tf.subtract(self.W_combined,weights_mean)
+                    self.W_combined = tf.divide(self.W_combined,100*tf.math.reduce_std(self.W_combined,axis=[0,1,2,3]))
+                    self.W_combined = tf.add(self.W_combined,weights_mean)
 
                     # Convolution
                     x = tf.nn.conv3d(
                         input=x,
-                        filter=W_combined,
+                        filter=self.W_combined,
                         strides=[int(st)]*5,
                         padding=pd
                     )
-                    x = tf.contrib.layers.batch_norm(
-                            inputs=x,
-                            decay=0.98,
-                            is_training=base.is_training,
-                        )
+#                     x = tf.contrib.layers.batch_norm(
+#                             inputs=x,
+#                             decay=0.9,
+#                             is_training=base.is_training,
+#                         )
 
                     if not (fn == 'none'):
                         x = ACTIVATION_FN[fn](x)
