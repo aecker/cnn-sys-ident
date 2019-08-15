@@ -15,8 +15,8 @@ sys.path.insert(0, repo_directory)
 # Load configuration for user
 dj.config.load(repo_directory + "conf/dj_conf_lhoefling.json")
 from schema.imaging_schema import *
-from schema.stimulus_schema import MovieQI, PreprocTraces, ChirpQI, OsDsIndexes,\
-    PreprocParams
+from schema.stimulus_schema import MovieQI, DetrendTraces, ChirpQI, OsDsIndexes,\
+    DetrendParams
 from cnn_sys_ident.retina.data import *
 from schema.stimulus_schema import MovieQI
 
@@ -40,31 +40,41 @@ class MultiDatasetWrapper:
         return data_interp
 
     def generate_dataset(self,
-                         filter_traces=True,
-                         preproc_param_set_id=2,
+                         detrend_traces=True,
+                         detrend_param_set_id=1,
                          quality_threshold_movie=0,
                          quality_threshold_chirp=0,
                          quality_threshold_ds=0):
-        if filter_traces:
-            preproc_param_key = 'preproc_param_set_id = {}'.format(
-                preproc_param_set_id
+        if detrend_traces:
+            detrend_param_key = 'detrend_param_set_id = {}'.format(
+                detrend_param_set_id
             )
-            ff_ = (PreprocParams() & preproc_param_key).fetch1('cutoff')
-            nn_ = (PreprocParams() & preproc_param_key).fetch1('non_negative')
-            bs_ = (PreprocParams() & preproc_param_key).fetch1('subtract_baseline')
-            bd_ = (PreprocParams() & preproc_param_key).fetch1('standardize')
+            window_length = \
+                (DetrendParams() & detrend_param_key).fetch1('window_length')
+            poly_order = \
+                (DetrendParams() & detrend_param_key).fetch1('poly_order')
+            non_negative = \
+                (DetrendParams() & detrend_param_key).fetch1('non_negative')
+            subtract_baseline = \
+                (DetrendParams() & detrend_param_key).fetch1('subtract_baseline')
+            standardize = \
+                (DetrendParams() & detrend_param_key).fetch1('standardize')
+
             print('Loading traces preprocessed with the following settings: '
-                  'Filter frequencey : {}, non-negative: {}, '
+                  'Window length for SavGol filter : {}, polynomial order for '
+                  'SavGol filter: {}, non negative: {}'
                   'baseline subtracted: {}, standardized: {}'.format(
-                ff_, nn_, bs_, bd_
-            ))
+                   window_length, poly_order, non_negative, subtract_baseline,
+                   standardize
+                  )
+                  )
         else:
             warnings.warn("You are retrieving raw traces, but quality indexes "
                           "are returned based on traces preprocessed with "
-                          "settings preproc_param_set_id = {}".format(
-                preproc_param_set_id
-            ))
-            preproc_param_key = 'preproc_param_set_id = 1'
+                          "settings detrend_param_set_id = {}".format(
+                           detrend_param_set_id
+                          ))
+            detrend_param_key = 'detrend_param_set_id = 1'
         key = self.key
         stim_path = self.stim_path
         projname = (ExpInfo() & key).fetch1('projname')
@@ -98,29 +108,17 @@ class MultiDatasetWrapper:
         for i, f in enumerate(fields):
             keys_field[i].update(key)
             keys_field[i].update(dict(field_id=f))
-            if quality_threshold_movie > 0:
-                qual_idxs_movie = \
-                    (MovieQI() & keys_field[i] &
-                     preproc_param_key).fetch("movie_qi")
-            temp_key = deepcopy(keys_field[i])
-            temp_key.pop("stim_id")
-            if quality_threshold_chirp > 0:
-                qual_idxs_chirp = \
-                    (ChirpQI() & temp_key & 'preproc_param_set_id=1').fetch("chirp_qi")
-            if quality_threshold_ds > 0:
-                qual_idxs_ds = \
-                    (OsDsIndexes() & temp_key & 'preproc_param_set_id=1').fetch("d_qi")
-            if filter_traces:
+            if detrend_traces:
                 traces = \
-                    (PreprocTraces() * Presentation() &
-                     keys_field[i] & preproc_param_key).fetch("preproc_traces")
+                    (DetrendTraces() * Presentation() &
+                     keys_field[i] & detrend_param_key).fetch("detrend_traces")
                 raw_traces = \
                     (Traces() * Presentation() &
                      keys_field[i]).fetch("traces")
                 assert len(traces) == len(raw_traces), \
                     "Number of ROIs returned for raw traces is not the " \
-                    "same as number of ROIs returned for preproc traces. You " \
-                    "need to populate PreprocTraces() with the desired preproc " \
+                    "same as number of ROIs returned for detrend traces. You " \
+                    "need to populate DetrendTraces() with the desired detrend " \
                     "settings."\
 
             else:
@@ -134,6 +132,28 @@ class MultiDatasetWrapper:
                 [np.linspace(t, t + 4.9666667, 5 * 30) for t in triggertimes]
             upsampled_triggertimes = np.concatenate(upsampled_triggertimes)
             num_neurons = len(traces)
+
+            if quality_threshold_movie > 0:
+                qual_idxs_movie = \
+                    (MovieQI() & keys_field[i] &
+                     detrend_param_key).fetch("movie_qi")
+            else:
+                qual_idxs_movie = np.ones(num_neurons, dtype=bool)
+            temp_key = deepcopy(keys_field[i])
+            temp_key.pop("stim_id")
+            if quality_threshold_chirp > 0:
+                qual_idxs_chirp = (
+                        ChirpQI() & temp_key & 'detrend_param_set_id=1'
+                ).fetch("chirp_qi")
+            else:
+                qual_idxs_chirp = np.ones(num_neurons, dtype=bool)
+            if quality_threshold_ds > 0:
+                qual_idxs_ds = (
+                        OsDsIndexes() & temp_key & 'detrend_param_set_id=1'
+                ).fetch("d_qi")
+            else:
+                qual_idxs_ds = np.ones(num_neurons, dtype=bool)
+
             if quality_threshold_movie > 0:
                 assert num_neurons == len(qual_idxs_movie), \
                     "Number of neurons and movie quality indexes not the same"
@@ -144,15 +164,12 @@ class MultiDatasetWrapper:
                 assert num_neurons == len(qual_idxs_ds), \
                     "Number of neurons and ds quality indexes not the same"
             responses = np.zeros((num_neurons, 150 * 123))
-            if (quality_threshold_chirp <= 0) and (quality_threshold_ds <= 0):
-                #quality_mask = np.logical_and(
-                #    (qual_idxs_movie > quality_threshold_movie),
-                #    np.logical_and((qual_idxs_chirp > quality_threshold_chirp),
-                #                   (qual_idxs_ds > quality_threshold_ds)))
-                quality_mask = qual_idxs_movie > quality_threshold_movie
-            else:
-                warnings.warn("You are trying to apply chirp and ds quality thresholds, which are not implemented")
-                quality_mask = np.ones_like(responses, dtype=bool)
+
+            quality_mask = np.logical_and(
+               (qual_idxs_movie > quality_threshold_movie),
+               np.logical_and((qual_idxs_chirp > quality_threshold_chirp),
+                              (qual_idxs_ds > quality_threshold_ds)))
+
             for n in range(num_neurons):
                 responses[n, :] = \
                     self.interpolate_weights(tracestimes[n],
