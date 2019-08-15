@@ -44,7 +44,8 @@ class MultiDatasetWrapper:
                          detrend_param_set_id=1,
                          quality_threshold_movie=0,
                          quality_threshold_chirp=0,
-                         quality_threshold_ds=0):
+                         quality_threshold_ds=0,
+                         downsample_size=32):
         if detrend_traces:
             detrend_param_key = 'detrend_param_set_id = {}'.format(
                 detrend_param_set_id
@@ -90,7 +91,8 @@ class MultiDatasetWrapper:
         movie_train, movie_test, random_sequences = \
             load_stimuli("Train_joined.tif",
                          "Test_joined.tif",
-                         STIMULUS_PATH=stim_path)
+                         STIMULUS_PATH=stim_path,
+                         downsample_size=downsample_size)
 
         header_paths = (Presentation() & key).fetch('h5_header')
         n_scans = len(header_paths)
@@ -188,7 +190,8 @@ class MultiDatasetWrapper:
                                      restriction,
                                      depths,
                                      movies=movies,
-                                     group=False)
+                                     group=False,
+                                     downsample_size=downsample_size)
         self.multi_dataset = multi_dataset
 
 
