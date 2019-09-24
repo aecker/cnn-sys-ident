@@ -496,3 +496,13 @@ class StackedFactorizedConv3dCore:
                 #     name='output'
                 # )
                 self.output = tf.identity(self.conv[-1], name='output')
+
+
+class IdentityCore:
+    def __init__(self,
+                 base,
+                 data,
+                 inputs,
+                 scope='core',
+                 **kwargs):
+        self.output = tf.identity(inputs, name='output')

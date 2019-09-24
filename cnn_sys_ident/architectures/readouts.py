@@ -3,6 +3,7 @@ import tensorflow as tf
 from tensorflow.contrib import layers, resampler
 
 from .utils import soft_threshold, inv_soft_threshold, sta_init
+from .cores import smoothness_regularizer_1d, smoothness_regularizer_2d, group_sparsity_regularizer_1d, group_sparsity_regularizer_2d
 
 
 def grid_sample(input, grid):
@@ -526,7 +527,98 @@ class SpatialXFeature3dL1Readout:
                     tf.losses.add_loss(1e-5 * tf.norm(self.biases2 + 1e-8),
                                        tf.GraphKeys.REGULARIZATION_LOSSES)
                     self.output += self.biases2
-                    
+
+
+class FactorizedConv3dReadout:
+    def __init__(self,
+                 base,
+                 data,
+                 inputs,
+                 filter_size_temporal=20,
+                 activation_fn=['none'],
+                 conv_smooth_weight_spatial=0.001,
+                 conv_smooth_weight_temporal=0.001,
+                 conv_sparse_weight=0.001,
+                 nonlinearity=True,
+                 final_bias=False,
+                 scope='core',
+                 reuse=False,
+                 **kwargs):
+        _, _, num_px_y, num_px_x, num_features = inputs.shape.as_list()
+        filter_size_spatial = num_px_x
+        num_neurons = data.num_neurons
+        with base.tf_session.graph.as_default():
+            with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
+                self.weights_temporal = []
+                self.weights_spatial = []
+                self.weights_scan_bias = []
+                self.weights_scan_scale = []
+
+                #filter: [filter_depth, filter_height, filter_width, in_channels, out_channels]
+                # spatial
+                self.weights_spatial=tf.get_variable(
+                                    name='readout_weights_spatial',
+                                    shape=[1, num_px_y, num_px_x,inputs.shape[-1],num_neurons],
+                                    initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.01))
+
+                #temporal
+                self.weights_temporal=tf.get_variable(
+                                    name='readout_weights_temporal',
+                                    shape=[filter_size_temporal,1,1,inputs.shape[-1],num_neurons],
+                                    initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.01))
+
+                # combined
+                self.W_combined = tf.einsum('dabio,chwio->dhwio',
+                                        self.weights_temporal,
+                                        self.weights_spatial,
+                                        name='readout_weights_combined'
+                )
+
+                # Convolution
+                self.conv = tf.nn.conv3d(input=inputs,
+                                           filter=self.W_combined,
+                                           strides=[1]*5,
+                                           padding='VALID',
+                                           name='conv'
+                )
+                self.h = tf.squeeze(self.conv, [2,3])
+
+                # regularization
+                if not(reuse):
+                    self.reg_loss = group_sparsity_regularizer_1d(
+                                self.weights_temporal[:,0,0,:,:],
+                                conv_sparse_weight
+                    )
+                    self.reg_loss += group_sparsity_regularizer_2d(
+                                self.weights_spatial[0,:,:,:,:],
+                                conv_sparse_weight
+                    )
+                    self.reg_loss += smoothness_regularizer_1d(
+                                self.weights_temporal[:,0,0,:,:],
+                                conv_smooth_weight_temporal
+                    )
+                    self.reg_loss += smoothness_regularizer_2d(
+                                self.weights_spatial[0,:,:,:,:],
+                                conv_smooth_weight_spatial
+                    )
+                    tf.losses.add_loss(self.reg_loss, tf.GraphKeys.REGULARIZATION_LOSSES)
+
+                # bias and output nonlinearity
+                _, responses = data.train()
+                if nonlinearity:
+                    bias_init = 0.5 * inv_soft_threshold(responses.mean(axis=0))
+                else:
+                    bias_init = - responses.mean(axis=0)
+                self.biases = tf.get_variable(
+                    'biases',
+                    shape=[num_neurons],
+                    initializer=tf.constant_initializer(bias_init))
+                if nonlinearity:
+                    self.output = tf.identity(soft_threshold(self.h + self.biases), name='output')
+                else:
+                    self.output = tf.identity(self.h + self.biases, name='output')
+
+
 class SpatialTransformerPooled3dReadout:
     def __init__(self,
                 base,
@@ -623,6 +715,3 @@ class MultiScanReadout:
         # readout_position = np.zeros(len(inputs)+1,dtype=int)
         # readout_position[1:] = np.cumsum(data.num_rois)
         self.output = tf.concat([r.output for r in self.readouts], axis=2) # VERIFY
-
-
-
