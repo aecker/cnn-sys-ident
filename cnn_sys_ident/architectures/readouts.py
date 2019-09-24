@@ -1,8 +1,16 @@
 import numpy as np
 import tensorflow as tf
-from tensorflow.contrib import layers
+from tensorflow.contrib import layers, resampler
 
 from .utils import soft_threshold, inv_soft_threshold, sta_init
+
+
+def grid_sample(input, grid):
+    _, num_px_y, num_px_x, num_features = input.shape.as_list()
+    i = tf.cast(num_px_y - 1, grid.dtype) * (grid[..., 0] + 1) / 2
+    j = tf.cast(num_px_x - 1, grid.dtype) * (grid[..., 1] + 1) / 2
+    grid_new = tf.stack([i, j], axis=-1)
+    return resampler.resampler(input, grid)
 
 
 class SpatialXFeatureJointL1Readout:
@@ -518,6 +526,85 @@ class SpatialXFeature3dL1Readout:
                     tf.losses.add_loss(1e-5 * tf.norm(self.biases2 + 1e-8),
                                        tf.GraphKeys.REGULARIZATION_LOSSES)
                     self.output += self.biases2
+                    
+class SpatialTransformerPooled3dReadout:
+    def __init__(self,
+                base,
+                data,
+                inputs,
+                pool_steps=1,
+                positive_feature_weights=False,
+                feature_sparsity=0.001,
+                bias=True,
+                init_range=.05,
+                kernel_size=2,
+                stride=2,
+                grid=None,
+                stop_grad=False,
+                scope='readout',
+                reuse=False,
+                nonlinearity=False,
+                **kwargs):
+        with base.tf_session.graph.as_default():
+            with tf.variable_scope(scope, reuse=reuse):
+				
+                x = inputs
+                self._pool_steps = pool_steps
+                N, t, num_px_y, num_px_x, num_features = inputs.shape.as_list()
+                num_neurons = data.num_neurons
+				
+                grid_init = tf.random_uniform_initializer(minval=-init_range, maxval=init_range)
+                self.grid = tf.get_variable(
+                    'grid',
+                    shape=[1, num_neurons, 2],
+                    initializer=grid_init)
+					
+                self.feature_weights = tf.get_variable(
+                    'features',
+                    shape=[num_neurons, num_features * (self._pool_steps + 1)],
+                    initializer=tf.constant_initializer(1/num_features))
+                self.mask = tf.get_variable(
+                    'mask',
+                    shape=self.feature_weights.shape,
+                    initializer=tf.ones_initializer)
+
+				
+                self.feature_weights *= self.mask
+                if positive_feature_weights:
+                    self.feature_weights = tf.clip_by_value(self.feature_weights,0,np.infty)
+                self.grid = tf.clip_by_value(self.grid, -1, 1)
+				
+                self.z = tf.reshape(x,[-1,num_px_y,num_px_x,num_features])
+                input_shape = tf.shape(inputs)
+                grid = tf.tile(self.grid,[input_shape[0]*input_shape[1],1,1])
+
+                pools = [grid_sample(self.z, grid)]
+                for i in range(self._pool_steps):
+                    self.z = tf.nn.avg_pool(self.z,ksize=[1, kernel_size, kernel_size, 1], strides=[1, stride, stride, 1], padding='VALID',  data_format='NHWC')
+                    pools.append(grid_sample(self.z, grid))
+
+                y = tf.concat(pools, axis=-1) # y.shape is B*D,N,C*(P+1)
+                y = tf.reshape(y,[input_shape[0],input_shape[1],num_neurons,num_features * (self._pool_steps + 1)])
+                y = tf.reduce_sum(y * self.feature_weights, -1)
+		
+				# add regularization loss for the readout layer
+                self.feature_reg = feature_sparsity * tf.reduce_sum(tf.abs(self.feature_weights))
+                tf.losses.add_loss(self.feature_reg, tf.GraphKeys.REGULARIZATION_LOSSES)
+
+                # bias and output nonlinearity
+                _, responses = data.train()
+                if nonlinearity:
+                    bias_init = 0.5 * inv_soft_threshold(responses.mean(axis=0))
+                else:
+                    bias_init = - responses.mean(axis=0)
+                self.biases = tf.get_variable(
+                    'biases',
+                    shape=[num_neurons],
+                    initializer=tf.constant_initializer(bias_init))
+                if nonlinearity:
+                    self.output = tf.identity(soft_threshold(y + self.biases), name='output')
+                else:
+                    self.output = tf.identity(y + self.biases, name='output')
 
 
 class MultiScanReadout:

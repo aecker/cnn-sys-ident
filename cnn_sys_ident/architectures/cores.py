@@ -393,6 +393,8 @@ class StackedFactorizedConv3dCore:
                  stride=[1, 1],
                  rate=[1, 1],
                  padding=['VALID', 'VALID'],
+                 nonzero_padding=False,
+                 padding_constant=0,
                  activation_fn=['elu', 'none'],
                  rel_smooth_weight=[1, 0],
                  rel_sparse_weight=[0, 1],
@@ -440,10 +442,13 @@ class StackedFactorizedConv3dCore:
                                            name='weights_combined_{}'.format(i)
                     )
                     
-                    weights_mean=tf.math.reduce_mean(self.W_combined,axis=[0,1,2,3])
-                    self.W_combined = tf.subtract(self.W_combined,weights_mean)
-                    self.W_combined = tf.divide(self.W_combined,100*tf.math.reduce_std(self.W_combined,axis=[0,1,2,3]))
-                    self.W_combined = tf.add(self.W_combined,weights_mean)
+#                     weights_mean=tf.math.reduce_mean(self.W_combined,axis=[0,1,2,3])
+#                     self.W_combined = tf.subtract(self.W_combined,weights_mean)
+#                     self.W_combined = tf.divide(self.W_combined,100*tf.math.reduce_std(self.W_combined,axis=[0,1,2,3]))
+#                     self.W_combined = tf.add(self.W_combined,weights_mean)
+
+                    if nonzero_padding:
+                        x = tf.pad(x,[[0,0],[0,0],[fs_s//2,fs_s//2],[fs_s//2,fs_s//2],[0,0]],mode='CONSTANT',constant_values=padding_constant)
 
                     # Convolution
                     x = tf.nn.conv3d(
@@ -452,11 +457,11 @@ class StackedFactorizedConv3dCore:
                         strides=[int(st)]*5,
                         padding=pd
                     )
-#                     x = tf.contrib.layers.batch_norm(
-#                             inputs=x,
-#                             decay=0.9,
-#                             is_training=base.is_training,
-#                         )
+                    x = tf.contrib.layers.batch_norm(
+                            inputs=x,
+                            decay=0.9,
+                            is_training=base.is_training,
+                        )
 
                     if not (fn == 'none'):
                         x = ACTIVATION_FN[fn](x)

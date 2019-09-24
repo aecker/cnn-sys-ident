@@ -110,7 +110,8 @@ class Trainer:
         rho = np.zeros(self.data.num_neurons)
         for i, (res, pred) in enumerate(zip(responses.T, predictions.T)):
             if np.std(res) > 1e-5 and np.std(pred) > 1e-5:
-                rho[i] = np.mean([stats.pearsonr(res[:,k],pred[:,k])[0] for k in range(res.shape[1])])
+#                 rho[i] = np.mean([stats.pearsonr(res[:,k],pred[:,k])[0] for k in range(res.shape[1])])
+                rho[i] = np.mean([stats.pearsonr(res[:,k],pred[:,k])[0] for k in np.where(np.var(res,axis=0)>0)[0]])
         return rho.mean() if average else rho
 
     def compute_val_var_expl(self):
@@ -121,7 +122,9 @@ class Trainer:
                          self.base.is_training: False}
             predictions = self.session.run(self.model.predictions, feed_dict)
         responses = crop_responses(predictions,responses)
-        return np.mean(1-np.mean((responses-predictions)**2,axis=1)/np.var(responses,axis=1))
+        # return np.mean(1-np.mean((responses-predictions)**2,axis=1)/np.var(responses,axis=1))
+        include=np.var(responses,axis=1)>1e-5
+        return np.mean(1-np.mean((responses-predictions)**2,axis=1)[include]/np.var(responses,axis=1)[include])
     
     def compute_test_var_expl(self):
         with self.graph.as_default():
