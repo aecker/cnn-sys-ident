@@ -218,7 +218,6 @@ class Dataset:
         # self.sta_space, self.sta_time = self.STA(self.movie_train,self.responses_train)
 
         # validation split
-        is_not_val = np.ones(self.movie_train.shape[0], dtype=bool)
         self.movie_val = np.zeros((NUM_VAL_CLIPS, self.clip_length, self.px_y, self.px_x, self.channels))#BDHW
         self.responses_val = np.zeros([NUM_VAL_CLIPS,self.clip_length,self.num_neurons])#BDN
         inv_order = np.argsort(movie_ordering)
@@ -226,9 +225,7 @@ class Dataset:
             ind2 = inv_order[ind1]
             self.movie_val[i] = self.movie_train[ind2*self.clip_length:(ind2+1)*self.clip_length]
             self.responses_val[i] = self.responses_train[ind2*self.clip_length:(ind2+1)*self.clip_length,:]
-            is_not_val[ind2*self.clip_length:(ind2+1)*self.clip_length] = False
-        self.movie_train = self.movie_train[is_not_val, :, :, :]
-        self.responses_train = self.responses_train[is_not_val, :]
+
         # val and test set in right shapes
         #self.movie_test = np.reshape(tmp_test_movies,[2,self.clip_length*5,self.px_y,self.px_x, self.channels])#BDHWC
         self.movie_val = np.reshape(self.movie_val,[NUM_VAL_CLIPS,self.clip_length,self.px_y,self.px_x, self.channels])#BDHWC

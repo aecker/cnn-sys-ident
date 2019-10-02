@@ -96,7 +96,8 @@ class Trainer:
         rho = np.zeros(self.data.num_neurons)
         for i, (res, pred) in enumerate(zip(responses.T, predictions.T)):
             if np.std(res) > 1e-5 and np.std(pred) > 1e-5:
-                rho[i] = stats.pearsonr(res, pred)[0]
+#                 rho[i] = stats.pearsonr(res, pred)[0] 
+                rho[i] = np.mean([stats.pearsonr(res[:,k],pred[:,k])[0] for k in range(res.shape[1])])
         return rho.mean() if average else rho
 
     def compute_val_corr(self, average=True):
