@@ -96,19 +96,26 @@ class Dataset:
     def __init__(self,
                  movie_train,
                  movie_test,
-                 movie_ordering,
+                 random_sequences,
+                 seq_idx,
                  responses, # ND
                  adapt = 0, # how many frames to discard from each clip / beginning of test to ignore adaptation
                  snr_tresh = - np.inf,
-                 filter_traces=False
+                 luminance_paths_train=[],
+                 luminance_paths_test=[],
+                 contrast_paths_train=[],
+                 contrast_paths_test=[]
                 ):
         #some init variabels
+        movie_ordering = random_sequences[:, seq_idx]
         self.num_train_samples, self.px_y, self.px_x, self.channels = movie_train.shape
         self.clip_length = 150
         self.num_clips = 108
         self.adapt = adapt
         self.num_neurons = responses.shape[0]
-
+        n_preprocessed_stim_versions = len(luminance_paths_train)
+        if n_preprocessed_stim_versions > 0:
+            self.channels += 4*n_preprocessed_stim_versions #(luminance + contrast) * color_channels = 4
         #split into train and (averaged) test responses
         self.responses_test = np.zeros((5*self.clip_length,self.num_neurons))#DN
         self.responses_train = np.zeros((self.num_clips*self.clip_length,self.num_neurons))#DN
@@ -132,7 +139,6 @@ class Dataset:
                                self.test_responses_by_trial[n, others[1]])
                 self.test_responses_for_oracle[n, i] = others
                 self.oracle[n, i] = stats.pearsonr(self.test_responses_by_trial[n, i], others)[0]
-
         # measure signal variance per ROI
         #self.total_variance = np.mean(np.var(self.test_responses_by_trial,axis=2),1)
         #self.noise_variance = np.mean(np.var(self.test_responses_by_trial,axis=1),1)
@@ -162,11 +168,41 @@ class Dataset:
                    np.sum(np.var(self.test_responses_by_trial, 2), 1)) / (
                   3 * (3 - 1))
         self.SP = self.SP.clip(min=1e-8)
-
         # order train movies
-        tmp_movies = np.zeros_like(movie_train)
-        for i,ind in enumerate(movie_ordering):
-            tmp_movies[i*self.clip_length:(i+1)*self.clip_length] = movie_train[ind*self.clip_length:(ind+1)*self.clip_length]
+        if n_preprocessed_stim_versions > 0:
+            tmp_movies_shape = list(movie_train.shape)
+            tmp_movies_shape[-1] += 4*n_preprocessed_stim_versions
+            tmp_movies = np.zeros(tmp_movies_shape)
+            for i,ind in enumerate(movie_ordering):
+                tmp_movies[i*self.clip_length:(i+1)*self.clip_length, :, :, :2] = \
+                    movie_train[ind*self.clip_length:(ind+1)*self.clip_length]
+            for i, path in enumerate(luminance_paths_train):
+                tmp_movies[:, :, :, 2*i+2:2*i+4] = \
+                    np.load(path)[seq_idx, :]
+            tmp_idx = 2*i+4
+            for i, path in enumerate(contrast_paths_train):
+                tmp_movies[:, :, :, 2*i+tmp_idx:2*i+tmp_idx+2] = \
+                    np.load(path)[seq_idx,:]
+
+            test_shape = list(movie_test.shape)
+            test_shape[-1] += 4*n_preprocessed_stim_versions
+            test_shape[0] = 2*test_shape[0]
+            tmp_test_movies = np.zeros(test_shape)
+            tmp_test_movies[:movie_test.shape[0], :, :, :2] = movie_test
+            tmp_test_movies[movie_test.shape[0]:, :, :, :2] = movie_test
+
+            for i, path in enumerate(luminance_paths_test):
+                tmp_test_movies[:, :, :, 2*i+2:2*i+4] = \
+                    np.load(path)[seq_idx, :]
+            tmp_idx = 2 * i + 4
+            for i, path in enumerate(contrast_paths_test):
+                tmp_test_movies[:, :, :, 2 * i + tmp_idx:2 * i + tmp_idx + 2] = \
+                    np.load(path)[seq_idx, :]
+
+        else:
+            tmp_movies = np.zeros_like(movie_train)
+            for i,ind in enumerate(movie_ordering):
+                tmp_movies[i*self.clip_length:(i+1)*self.clip_length] = movie_train[ind*self.clip_length:(ind+1)*self.clip_length]
         self.movie_train = tmp_movies
 
         # calculate STA
@@ -182,7 +218,7 @@ class Dataset:
             self.responses_val[i] = self.responses_train[ind2*self.clip_length:(ind2+1)*self.clip_length,:]
 
         # val and test set in right shapes
-        self.movie_test = np.reshape(movie_test,[1,self.clip_length*5,self.px_y,self.px_x, self.channels])#BDHWC
+        self.movie_test = np.reshape(tmp_test_movies,[2,self.clip_length*5,self.px_y,self.px_x, self.channels])#BDHWC
         self.movie_val = np.reshape(self.movie_val,[NUM_VAL_CLIPS,self.clip_length,self.px_y,self.px_x, self.channels])#BDHWC
         self.responses_test = np.reshape(self.responses_test,[1,-1,self.num_neurons])#BDN
 
@@ -280,6 +316,10 @@ class MultiDataset:
                  depths,
                  adapt = 0,
                  movies = None,
+                 luminance_paths_train = [],
+                 luminance_paths_test = [],
+                 contrast_paths_train = [],
+                 contrast_paths_test = [],
                  snr_thresh = -np.inf,
                  scan_in_batch = False,
                  group = False,
@@ -337,9 +377,14 @@ class MultiDataset:
                 print('Random sequence {}, number of ROIs {}'.format(scan, self.num_rois[i]))
                 print(self.scan_keys[i])
                 self.scans.append(Dataset(self.movie_train, self.movie_test,
-                                          self.random_sequences[:, scan],
+                                          self.random_sequences,
+                                          scan,
                                           self.responses[i],
-                                          adapt, snr_thresh))
+                                          adapt, snr_thresh,
+                                          luminance_paths_train,
+                                          luminance_paths_test,
+                                          contrast_paths_train,
+                                          contrast_paths_test))
                 self.depths[i] = self.depths[i][self.scans[i].snr_ind]
             self.depths = np.concatenate(self.depths)
 

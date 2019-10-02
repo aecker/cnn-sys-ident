@@ -16,7 +16,7 @@ sys.path.insert(0, repo_directory)
 dj.config.load(repo_directory + "conf/dj_conf_cbehrens.json")
 from schema.imaging_schema import *
 from schema.stimulus_schema import MovieQI, DetrendTraces, ChirpQI, OsDsIndexes,\
-    DetrendParams
+    DetrendParams, MouseCamMovieFiltParams, MouseCamMovieFiltering
 from cnn_sys_ident.retina.data import *
 from schema.stimulus_schema import MovieQI
 
@@ -45,7 +45,8 @@ class MultiDatasetWrapper:
                          quality_threshold_movie=0,
                          quality_threshold_chirp=0,
                          quality_threshold_ds=0,
-                         downsample_size=32):
+                         downsample_size=32,
+                         mouse_cam_filt_params=[]):
         if detrend_traces:
             detrend_param_key = 'detrend_param_set_id = {}'.format(
                 detrend_param_set_id
@@ -77,6 +78,7 @@ class MultiDatasetWrapper:
                           ))
             detrend_param_key = 'detrend_param_set_id = 1'
         key = self.key
+        roi_masks = (Field().RoiMask() & key).fetch("roi_mask")
         stim_path = self.stim_path
         projname = (ExpInfo() & key).fetch1('projname')
         if projname.find("RGC") >= 0:
@@ -88,6 +90,45 @@ class MultiDatasetWrapper:
         else:
             raise Exception('Cannot identify stimulus location '
                             'for experiment from project ' + projname)
+        luminance_paths_train = []
+        luminance_paths_test = []
+        contrast_paths_train = []
+        contrast_paths_test = []
+        for param in mouse_cam_filt_params:
+            mc_stim_path = (
+                    MouseCamMovieFiltParams() &
+                    'mouse_cam_filt_params = {}'.format(param)
+            ).fetch1("mouse_cam_movie_stim_path")
+            #assert stim_path == mc_stim_path, "Conflicting stimulus paths"
+            mc_downsample_size = (
+                MouseCamMovieFiltParams() &
+                'mouse_cam_filt_params = {}'.format(param)
+            ).fetch1("downsample_size")
+            assert mc_downsample_size == downsample_size, "Conflicting downsampling sizes"
+            luminance_path_train = (
+                    MouseCamMovieFiltering() &
+                    'mouse_cam_filt_params = {}'.format(param)
+            ).fetch1("luminance_path_train")
+            luminance_path_test = (
+                    MouseCamMovieFiltering() &
+                    'mouse_cam_filt_params = {}'.format(param)
+            ).fetch1("luminance_path_test")
+            contrast_path_train = (
+                    MouseCamMovieFiltering() &
+                    'mouse_cam_filt_params = {}'.format(param)
+            ).fetch1("contrast_path_train")
+            contrast_path_test = (
+                    MouseCamMovieFiltering() &
+                    'mouse_cam_filt_params = {}'.format(param)
+            ).fetch1("contrast_path_test")
+            luminance_path_train = stim_path + luminance_path_train
+            luminance_path_test = stim_path + luminance_path_test
+            contrast_path_train = stim_path + contrast_path_train
+            contrast_path_test = stim_path + contrast_path_test
+            luminance_paths_train.append(luminance_path_train)
+            luminance_paths_test.append(luminance_path_test)
+            contrast_paths_train.append(contrast_path_train)
+            contrast_paths_test.append(contrast_path_test)
         movie_train, movie_test, random_sequences = \
             load_stimuli("Train_joined.tif",
                          "Test_joined.tif",
@@ -102,7 +143,7 @@ class MultiDatasetWrapper:
             scan_sequence_idxs[i] = \
                 int(re.search("MC(.+?).h5", filename).group(1))
 
-        fields = (Presentation() & key).fetch("field_id")
+        fields       = (Presentation() & key).fetch("field_id")
         responses_all = [[] for _ in fields]
         num_rois_all = [[] for _ in fields]
         restriction = [[] for _ in fields]
@@ -190,9 +231,14 @@ class MultiDatasetWrapper:
                                      restriction,
                                      depths,
                                      movies=movies,
+                                     luminance_paths_train=luminance_paths_train,
+                                     luminance_paths_test=luminance_paths_test,
+                                     contrast_paths_train=contrast_paths_train,
+                                     contrast_paths_test=contrast_paths_test,
                                      group=False,
                                      downsample_size=downsample_size)
         self.multi_dataset = multi_dataset
+        self.roi_masks = roi_masks
 
 
 # %%
