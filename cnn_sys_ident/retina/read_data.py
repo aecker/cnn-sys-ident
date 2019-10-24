@@ -46,7 +46,9 @@ class MultiDatasetWrapper:
                          quality_threshold_chirp=0,
                          quality_threshold_ds=0,
                          downsample_size=32,
-                         mouse_cam_filt_params=[]):
+                         mouse_cam_filt_params=[],
+                         color_channels=True,
+                         adapt=0):
         if detrend_traces:
             detrend_param_key = 'detrend_param_set_id = {}'.format(
                 detrend_param_set_id
@@ -133,7 +135,8 @@ class MultiDatasetWrapper:
             load_stimuli("Train_joined.tif",
                          "Test_joined.tif",
                          STIMULUS_PATH=stim_path,
-                         downsample_size=downsample_size)
+                         downsample_size=downsample_size,
+                         mouse_cam=color_channels)
 
         header_paths = (Presentation() & key).fetch('h5_header')
         n_scans = len(header_paths)
@@ -236,7 +239,8 @@ class MultiDatasetWrapper:
                                      contrast_paths_train=contrast_paths_train,
                                      contrast_paths_test=contrast_paths_test,
                                      group=False,
-                                     downsample_size=downsample_size)
+                                     downsample_size=downsample_size,
+                                     adapt=adapt)
         self.multi_dataset = multi_dataset
         self.roi_masks = roi_masks
 

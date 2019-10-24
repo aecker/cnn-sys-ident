@@ -29,9 +29,10 @@ def load_stimuli(train_movie_file,
                  random_sequences_file = 'RandomSequences.npy',
                  downsample_this = True,
                  downsample_size = 32,
+                 mouse_cam = True,
                  STIMULUS_PATH = STIMULUS_PATH):
     #mouse_cam = train_movie_file[:5] == 'mouse'
-    mouse_cam = True
+#     mouse_cam = True
     # train movie
     train_movie_file = os.path.join(STIMULUS_PATH, train_movie_file)
     Train = Image.open(train_movie_file)
@@ -242,8 +243,12 @@ class Dataset:
                 if length > 0:
                     self.seq_start_idx.append(start_idx)
                     self.seq_length.append(length)
-                    start_idx = current_idx + self.clip_length
+                start_idx = current_idx + self.clip_length
             current_idx += self.clip_length
+        length = current_idx - start_idx
+        if length > 0:
+            self.seq_start_idx.append(start_idx)
+            self.seq_length.append(length)
 
         # taking away X seconds of each clip to ignore adaptation
         if self.adapt > 0:
@@ -290,7 +295,7 @@ class Dataset:
         shift = np.random.randint(0, np.min([chunk_size, self.clip_length - self.adapt - chunk_size]))
         chunk_start_idx = []
         for start, length in zip(self.seq_start_idx, self.seq_length):
-            idx = np.arange(start + shift, start + shift + length+1, chunk_size)
+            idx = np.arange(start + shift, start + shift + length - chunk_size + 1, chunk_size)
             chunk_start_idx += list(idx[:-1])
         self.chunk_start_idx = np.random.permutation(chunk_start_idx)
         # self.num_chunks = len(chunk_start_idx)
