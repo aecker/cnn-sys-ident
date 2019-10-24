@@ -698,6 +698,126 @@ class SpatialTransformerPooled3dReadout:
                 else:
                     self.output = tf.identity(y + self.biases, name='output')
 
+                    
+class SpatialTransformerPooled3dCalciumReadout:
+    def __init__(self,
+                base,
+                data,
+                inputs,
+                pool_steps=1,
+                positive_feature_weights=False,
+                feature_sparsity=0.001,
+                bias=True,
+                init_range=.05,
+                kernel_size=2,
+                stride=2,
+                grid=None,
+                stop_grad=False,
+                scope='readout',
+                reuse=False,
+                nonlinearity=False,
+                **kwargs):
+        with base.tf_session.graph.as_default():
+            with tf.variable_scope(scope, reuse=reuse):
+				
+                x = inputs
+                self._pool_steps = pool_steps
+                N, t, num_px_y, num_px_x, num_features = inputs.shape.as_list()
+                num_neurons = data.num_neurons
+				
+                grid_init = tf.random_uniform_initializer(minval=-init_range, maxval=init_range)
+                self.grid = tf.get_variable(
+                    'grid',
+                    shape=[1, num_neurons, 2],
+                    initializer=grid_init)
+					
+                self.feature_weights = tf.get_variable(
+                    'features',
+                    shape=[num_neurons, num_features * (self._pool_steps + 1)],
+                    initializer=tf.constant_initializer(1/num_features))
+                self.mask = tf.get_variable(
+                    'mask',
+                    shape=self.feature_weights.shape,
+                    initializer=tf.ones_initializer)
+
+				
+                self.feature_weights *= self.mask
+                if positive_feature_weights:
+                    self.feature_weights = tf.clip_by_value(self.feature_weights,0,np.infty)
+                self.grid = tf.clip_by_value(self.grid, -1, 1)
+				
+                self.z = tf.reshape(x,[-1,num_px_y,num_px_x,num_features])
+                input_shape = tf.shape(inputs)
+                grid = tf.tile(self.grid,[input_shape[0]*input_shape[1],1,1])
+
+                pools = [grid_sample(self.z, grid)]
+                for i in range(self._pool_steps):
+                    self.z = tf.nn.avg_pool(self.z,ksize=[1, kernel_size, kernel_size, 1], strides=[1, stride, stride, 1], padding='VALID',  data_format='NHWC')
+                    pools.append(grid_sample(self.z, grid))
+
+                y = tf.concat(pools, axis=-1) # y.shape is B*D,N,C*(P+1)
+                y = tf.reshape(y,[input_shape[0],input_shape[1],num_neurons,num_features * (self._pool_steps + 1)])
+                y = tf.reduce_sum(y * self.feature_weights, -1)
+		
+				# add regularization loss for the readout layer
+                self.feature_reg = feature_sparsity * tf.reduce_sum(tf.abs(self.feature_weights))
+                tf.losses.add_loss(self.feature_reg, tf.GraphKeys.REGULARIZATION_LOSSES)
+
+                # bias and output nonlinearity
+                _, responses = data.train()
+                if nonlinearity:
+                    bias_init = 0.5 * inv_soft_threshold(responses.mean(axis=0))
+                else:
+                    bias_init = - responses.mean(axis=0)
+                self.biases = tf.get_variable(
+                    'biases',
+                    shape=[num_neurons],
+                    initializer=tf.constant_initializer(bias_init))
+                if nonlinearity:
+                    y = soft_threshold(y + self.biases)
+                else:
+                    y = y + self.biases
+                
+                #define the calcium kernel
+                calcium_kernel_size = 30
+                timebase = tf.constant(np.linspace(0, 1, calcium_kernel_size), dtype=tf.float32)
+                init_1 = tf.constant(-50*np.random.rand(1)[0], dtype=tf.float32)
+                init_2 = tf.constant(-25*np.random.rand(1)[0], dtype=tf.float32)
+                calcium_kernel_tau_1 = tf.get_variable("calcium_kernel_tau_1",
+                                                           dtype=tf.float32,
+                                                           initializer=init_1)
+                calcium_kernel_tau_2 = tf.get_variable("calcium_kernel_tau_2",
+                                                           dtype=tf.float32,
+                                                           initializer=init_2)
+                ca_kernel_weight=tf.get_variable('ca_kernel_weights',shape=2,
+                                                 initializer=tf.initializers.constant(0.5))
+                calcium_kernel = ca_kernel_weight[0]*tf.exp(tf.scalar_mul(calcium_kernel_tau_1,timebase)) \
+                                + ca_kernel_weight[1]*tf.exp(tf.scalar_mul(calcium_kernel_tau_2,timebase))
+                calcium_kernel = tf.reverse(calcium_kernel, axis=[0])
+                #calcium_kernel = tf.expand_dims(calcium_kernel, axis = [0])
+                calcium_kernel = tf.expand_dims(calcium_kernel, axis = [-1])
+                calcium_kernel = tf.expand_dims(calcium_kernel, axis = [-1])
+                self.calcium_kernel = tf.expand_dims(calcium_kernel, axis = [-1])
+                #num_neurons = y.shape.as_list()[-1]
+                #calcium_kernel = tf.tile(calcium_kernel,
+                #                         multiples=[num_neurons*num_neurons])
+                #calcium_kernel = tf.reshape(calcium_kernel, 
+                #                            shape = [calcium_kernel_size, num_neurons, num_neurons], name='calcium_kernel')
+                #pad the input
+                paddings = tf.constant([[0, 0], 
+                                        [calcium_kernel_size-1, 0], 
+                                        [0, 0]])
+                y = tf.pad(y, paddings, "CONSTANT")
+                self.ca_kernel_input = tf.expand_dims(y, axis = [-1])
+                ca_kernel_output = tf.nn.convolution(self.ca_kernel_input, 
+                                                self.calcium_kernel, 
+                                                name='output',
+                                                padding='VALID'
+                                               )
+                self.output = tf.squeeze(ca_kernel_output,-1)
+                
+                
+                    
 
 class MultiScanReadout:
     def __init__(self,

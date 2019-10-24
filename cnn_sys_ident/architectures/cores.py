@@ -602,7 +602,7 @@ class StackedFactorizedConv3dAdaptationCore:
                 # no symmetric crop possible for even filter_size_spatial
                 crop_start = int(np.floor((np.sum(filter_size_spatial)-len(filter_size_spatial))/2))
                 crop_end = int(np.ceil((np.sum(filter_size_spatial)-len(filter_size_spatial))/2))
-                self.cropped_adaptation_stim = inputs[:,np.sum(filter_size_temporal)-1:,crop_start:-crop_end,crop_start:-crop_end,:2]
+                self.cropped_adaptation_stim = inputs[:,np.sum(filter_size_temporal)-1:,crop_start:-crop_end,crop_start:-crop_end,2:]
                 self.output = tf.concat([self.conv[-1],self.cropped_adaptation_stim], axis = -1, name='output')
 
 

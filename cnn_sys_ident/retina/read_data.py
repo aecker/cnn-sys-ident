@@ -146,7 +146,8 @@ class MultiDatasetWrapper:
             scan_sequence_idxs[i] = \
                 int(re.search("MC(.+?).h5", filename).group(1))
 
-        fields       = (Presentation() & key).fetch("field_id")
+        fields = (Presentation() & key).fetch("field_id")
+        roi_ids_all = [[] for _ in fields]
         responses_all = [[] for _ in fields]
         num_rois_all = [[] for _ in fields]
         restriction = [[] for _ in fields]
@@ -178,7 +179,7 @@ class MultiDatasetWrapper:
                 [np.linspace(t, t + 4.9666667, 5 * 30) for t in triggertimes]
             upsampled_triggertimes = np.concatenate(upsampled_triggertimes)
             num_neurons = len(traces)
-
+            roi_ids = (Roi() & keys_field[i]).fetch("roi_id")
             if quality_threshold_movie > 0:
                 qual_idxs_movie = \
                     (MovieQI() & keys_field[i] &
@@ -222,6 +223,7 @@ class MultiDatasetWrapper:
                                              traces[n],
                                              upsampled_triggertimes)
             responses_all[i] = responses[quality_mask]
+            roi_ids_all[i] = roi_ids[quality_mask]
             num_rois_all[i] = len(qual_idxs_movie[quality_mask])
             depths = [np.zeros(num_rois_all[i]) for i in range(len(fields))]
             movies = movie_train, movie_test, random_sequences
@@ -243,6 +245,7 @@ class MultiDatasetWrapper:
                                      adapt=adapt)
         self.multi_dataset = multi_dataset
         self.roi_masks = roi_masks
+        self.roi_ids = roi_ids_all
 
 
 # %%
