@@ -16,19 +16,19 @@ sys.path.insert(0, repo_directory)
 dj.config.load(repo_directory + "conf/dj_conf_cbehrens.json")
 from schema.imaging_schema import *
 from schema.stimulus_schema import MovieQI, DetrendTraces, ChirpQI, OsDsIndexes,\
-    DetrendParams, MouseCamMovieFiltParams, MouseCamMovieFiltering
+    DetrendParams, MouseCamMovieFiltParams, MouseCamMovieFiltering, Stimulus
 from cnn_sys_ident.retina.data import *
 from schema.stimulus_schema import MovieQI
 
 
 # %%
 class MultiDatasetWrapper:
-    def __init__(self, experimenter, date, exp_num, stim_path):
+    def __init__(self, experimenter, date, exp_num, stim_path, stim_id):
         self.stim_path = stim_path
         self.key = dict(experimenter=experimenter,
                         date=date,
                         exp_num=exp_num,
-                        stim_id=5)
+                        stim_id=stim_id)
 
     def interpolate_weights(self, orig_times, orig_data, new_times):
         data_interp = interp1d(
@@ -48,7 +48,9 @@ class MultiDatasetWrapper:
                          downsample_size=32,
                          mouse_cam_filt_params=[],
                          color_channels=True,
-                         adapt=0):
+                         adapt=0,
+                         target_fs=15
+                         ):
         if detrend_traces:
             detrend_param_key = 'detrend_param_set_id = {}'.format(
                 detrend_param_set_id
@@ -131,20 +133,47 @@ class MultiDatasetWrapper:
             luminance_paths_test.append(luminance_path_test)
             contrast_paths_train.append(contrast_path_train)
             contrast_paths_test.append(contrast_path_test)
-        movie_train, movie_test, random_sequences = \
-            load_stimuli("Train_joined.tif",
-                         "Test_joined.tif",
-                         STIMULUS_PATH=stim_path,
-                         downsample_size=downsample_size,
-                         mouse_cam=color_channels)
+        if self.key["stim_id"] == 5:
+            #movie_train shape: (16200, 56, 56, 2)
+            #movie_test shape: (750, 56, 56, 2)
+            movie_train, movie_test, random_sequences = \
+                load_stimuli("Train_joined.tif",
+                             "Test_joined.tif",
+                             STIMULUS_PATH=stim_path,
+                             downsample_size=downsample_size,
+                             downsample_this=False,
+                             mouse_cam=color_channels)
+        elif self.key["stim_id"] == 0:
+            stim_framerate = (Stimulus() & 'stim_id = {}'.format(
+                self.key["stim_id"])
+                    ).fetch1("framerate")
+            assert target_fs % stim_framerate == 0, "target frame rate is not an integer multiple of native stimulus framerate"
+            up_factor = int(target_fs // stim_framerate)  # determine by how much the trigger should be upsampled
+            stim = (Stimulus() & 'stim_id = {}'.format(
+                self.key["stim_id"])
+                    ).fetch1("stimulus_trace") #shape (15, 20, 1500)
+            stim = stim.transpose(-1, 0, 1)
+            #repeat every stimulus frame up_factor times
+            reshaped = stim.reshape(stim.shape[0], -1)
+            repeated = np.repeat(reshaped, [up_factor]*stim.shape[0], axis=0)
+            stim = repeated.reshape(repeated.shape[0], 15, 20)
+            #split into 10 % test, 80 % train, 10 % test
+            movie_train = stim[150*up_factor:-150*up_factor]
+            movie_test = np.vstack(
+                (stim[:150*up_factor, :, :], stim[-150*up_factor:, :, :]))
+            #insert channel dimension
+            movie_train = np.expand_dims(movie_train, -1)
+            movie_test = np.expand_dims(movie_test, -1)
+            random_sequences = []
 
         header_paths = (Presentation() & key).fetch('h5_header')
         n_scans = len(header_paths)
         scan_sequence_idxs = np.zeros(n_scans, dtype=int)
-        for i, h in enumerate(header_paths):
-            filename = h.split('/')[-1]
-            scan_sequence_idxs[i] = \
-                int(re.search("MC(.+?).h5", filename).group(1))
+        if self.key["stim_id"] == 5:
+            for i, h in enumerate(header_paths):
+                filename = h.split('/')[-1]
+                scan_sequence_idxs[i] = \
+                    int(re.search("MC(.+?).h5", filename).group(1))
 
         fields = (Presentation() & key).fetch("field_id")
         roi_ids_all = [[] for _ in fields]
@@ -175,9 +204,19 @@ class MultiDatasetWrapper:
                 (Traces() * Presentation() & keys_field[i]).fetch("traces_times")
             triggertimes = \
                 (Presentation() & keys_field[i]).fetch1("triggertimes")
-            upsampled_triggertimes = \
-                [np.linspace(t, t + 4.9666667, 5 * 30) for t in triggertimes]
-            upsampled_triggertimes = np.concatenate(upsampled_triggertimes)
+            if self.key["stim_id"] == 5:
+                #if movie, upsample triggertimes to get 1 trigger per frame, (instead of just 1 trigger per sequence)
+                upsampled_triggertimes = \
+                    [np.linspace(t, t + 4.9666667, 5 * 30)
+                     for t in triggertimes]
+                upsampled_triggertimes = np.concatenate(upsampled_triggertimes)
+            elif self.key["stim_id"] == 0:
+                up_factor = target_fs/stim_framerate # determine by how much the trigger should be upsampled
+                ifi = 1/stim_framerate #interframe interval
+                upsampled_triggertimes = \
+                    [np.linspace(t, t + ifi, up_factor, endpoint=False)
+                     for t in triggertimes]
+                upsampled_triggertimes = np.concatenate(upsampled_triggertimes)
             num_neurons = len(traces)
             roi_ids = (Roi() & keys_field[i]).fetch("roi_id")
             if quality_threshold_movie > 0:
@@ -210,18 +249,27 @@ class MultiDatasetWrapper:
             if quality_threshold_ds > 0:
                 assert num_neurons == len(qual_idxs_ds), \
                     "Number of neurons and ds quality indexes not the same"
-            responses = np.zeros((num_neurons, 150 * 123))
 
             quality_mask = np.logical_and(
                (qual_idxs_movie > quality_threshold_movie),
                np.logical_and((qual_idxs_chirp > quality_threshold_chirp),
                               (qual_idxs_ds > quality_threshold_ds)))
 
-            for n in range(num_neurons):
-                responses[n, :] = \
-                    self.interpolate_weights(tracestimes[n],
-                                             traces[n],
-                                             upsampled_triggertimes)
+            if self.key["stim_id"] == 5:
+                responses = np.zeros((num_neurons, 150 * 123))
+                for n in range(num_neurons):
+                    responses[n, :] = \
+                        self.interpolate_weights(tracestimes[n],
+                                                 traces[n],
+                                                 upsampled_triggertimes)
+            elif self.key["stim_id"] == 0:
+                responses = np.zeros((num_neurons, stim.shape[0]))
+                for n in range(num_neurons):
+                    responses[n, :] = \
+                        self.interpolate_weights(tracestimes[n],
+                                                 traces[n],
+                                                 upsampled_triggertimes)
+
             responses_all[i] = responses[quality_mask]
             roi_ids_all[i] = roi_ids[quality_mask]
             num_rois_all[i] = len(qual_idxs_movie[quality_mask])
