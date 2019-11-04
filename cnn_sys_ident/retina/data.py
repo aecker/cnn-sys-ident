@@ -22,6 +22,11 @@ rnd = np.random.RandomState(seed=2364782)
 VAL_CLIP_IDX = set(rnd.choice(NUM_CLIPS, NUM_VAL_CLIPS, replace=False))
 TRAIN_CLIP_IDX = list(set(range(NUM_CLIPS)) - VAL_CLIP_IDX)
 VAL_CLIP_IDX = list(VAL_CLIP_IDX)
+NUM_NOISE_CLIPS = 40
+NUM_NOISE_VAL_CLIPS = 6
+NOISE_VAL_CLIP_IDX = set(rnd.choice(NUM_NOISE_CLIPS, NUM_NOISE_VAL_CLIPS, replace=False))
+NOISE_TRAIN_CLIP_IDX = list(set(range(NUM_NOISE_CLIPS)) - NOISE_VAL_CLIP_IDX)
+NOISE_VAL_CLIP_IDX = list(NOISE_VAL_CLIP_IDX)
     
 ## go through all clips and just match responses
 def load_stimuli(train_movie_file,
@@ -108,129 +113,173 @@ class Dataset:
                  contrast_paths_test=[]
                 ):
         #some init variabels
-        movie_ordering = random_sequences[:, seq_idx]
+        if len(random_sequences)==0:
+            noise = True
+            train_clip_idx = NOISE_TRAIN_CLIP_IDX
+            val_clip_idx = NOISE_VAL_CLIP_IDX
+            num_clips = NUM_NOISE_CLIPS
+        else:
+            noise = False
+            train_clip_idx = TRAIN_CLIP_IDX
+            val_clip_idx = VAL_CLIP_IDX
+            num_clips = NUM_CLIPS
+        # movie_ordering = random_sequences[:, seq_idx]###
         self.num_train_samples, self.px_y, self.px_x, self.channels = movie_train.shape
-        self.clip_length = 150
-        self.num_clips = 108
+        if noise:
+            self.clip_length = 90
+            self.num_clips = 40
+            movie_ordering = np.arange(self.num_clips)
+        else:
+            movie_ordering = random_sequences[:, seq_idx]
+            self.clip_length = 150
+            self.num_clips = 108
         self.adapt = adapt
         self.num_neurons = responses.shape[0]
         n_preprocessed_stim_versions = len(luminance_paths_train)
         if n_preprocessed_stim_versions > 0:
             self.channels += 4*n_preprocessed_stim_versions #(luminance + contrast) * color_channels = 4
         #split into train and (averaged) test responses
-        self.responses_test = np.zeros((5*self.clip_length,self.num_neurons))#DN
-        self.responses_train = np.zeros((self.num_clips*self.clip_length,self.num_neurons))#DN
-        self.test_responses_by_trial = []
-        for roi in range(self.num_neurons):
-            tmp = np.vstack((responses[roi,:5*self.clip_length],
-                             responses[roi,59*self.clip_length:64*self.clip_length],
-                             responses[roi,118*self.clip_length:]))
-            self.test_responses_by_trial.append(tmp)#calculated below after z-scoring
-            self.responses_test[:,roi] = np.mean(tmp,0)
-            self.responses_train[:,roi] = np.concatenate((responses[roi,5*self.clip_length:59*self.clip_length],
-                                                          responses[roi,64*self.clip_length:118*self.clip_length]))
-        self.test_responses_by_trial = np.asarray(self.test_responses_by_trial)
-        # measure oracle (test set correlation each with remaining n-1, averaged)
-        self.test_responses_for_oracle = np.zeros_like(self.test_responses_by_trial)
-        self.oracle = np.zeros((self.num_neurons, 3))
-        for i in range(3):
-            for n in range(self.num_neurons):
-                others = list({0,1,2} - {i})
-                others = .5 * (self.test_responses_by_trial[n, others[0]] +
-                               self.test_responses_by_trial[n, others[1]])
-                self.test_responses_for_oracle[n, i] = others
-                self.oracle[n, i] = stats.pearsonr(self.test_responses_by_trial[n, i], others)[0]
+        if noise:
+            self.responses_test = np.vstack(
+                (responses[:,:5*self.clip_length], responses[:,-5*self.clip_length:])).T
+            self.responses_train = responses[:,5*self.clip_length:-5*self.clip_length].T
+        else:
+            self.responses_test = np.zeros((5*self.clip_length,self.num_neurons))#DN
+            self.responses_train = np.zeros((self.num_clips*self.clip_length,self.num_neurons))#DN
+            self.test_responses_by_trial = []
+            for roi in range(self.num_neurons):
+                tmp = np.vstack((responses[roi,:5*self.clip_length],
+                                 responses[roi,59*self.clip_length:64*self.clip_length],
+                                 responses[roi,118*self.clip_length:]))
+                self.test_responses_by_trial.append(tmp)#calculated below after z-scoring
+                self.responses_test[:,roi] = np.mean(tmp,0)
+                self.responses_train[:,roi] = np.concatenate((responses[roi,5*self.clip_length:59*self.clip_length],
+                                                              responses[roi,64*self.clip_length:118*self.clip_length]))
+            self.test_responses_by_trial = np.asarray(self.test_responses_by_trial)
+            # measure oracle (test set correlation each with remaining n-1, averaged)
+            self.test_responses_for_oracle = np.zeros_like(self.test_responses_by_trial)
+            self.oracle = np.zeros((self.num_neurons, 3))
+            for i in range(3):
+                for n in range(self.num_neurons):
+                    others = list({0,1,2} - {i})
+                    others = .5 * (self.test_responses_by_trial[n, others[0]] +
+                                   self.test_responses_by_trial[n, others[1]])
+                    self.test_responses_for_oracle[n, i] = others
+                    self.oracle[n, i] = stats.pearsonr(self.test_responses_by_trial[n, i], others)[0]
         # measure signal variance per ROI
         #self.total_variance = np.mean(np.var(self.test_responses_by_trial,axis=2),1)
         #self.noise_variance = np.mean(np.var(self.test_responses_by_trial,axis=1),1)
         #self.signal_variance = self.total_variance - self.noise_variance
-        self.signal_variance = np.var(self.responses_test,0)
-        self.noise_variance = np.mean(np.var(self.test_responses_by_trial,1)/3,1)#divided by three repeats
-        self.total_variance = self.signal_variance + self.noise_variance
-        self.SNR = self.signal_variance / self.noise_variance
-
-        # filter out too low SNR
-        snr_ind = self.SNR > snr_tresh
-        self.num_neurons = np.sum(snr_ind)
-        self.input_shape = [None, None, self.px_y, self.px_x, self.channels]
-        self.output_shape = [None, None, self.num_neurons]
-        self.responses_train = self.responses_train[:, snr_ind]
-        self.responses_test = self.responses_test[:, snr_ind]
-        self.test_responses_for_oracle = self.test_responses_for_oracle[snr_ind]
-        self.test_responses_by_trial = self.test_responses_by_trial[snr_ind]
-        self.total_variance = self.total_variance[snr_ind]
-        self.noise_variance = self.noise_variance[snr_ind]
-        self.signal_variance = self.signal_variance[snr_ind]
-        self.SNR = self.SNR[snr_ind]
-        self.snr_ind = snr_ind
-
-        # CC_norm (Schoppe &al, 2016)
-        self.SP = (np.var(np.sum(self.test_responses_by_trial, 1), 1) -
-                   np.sum(np.var(self.test_responses_by_trial, 2), 1)) / (
-                  3 * (3 - 1))
-        self.SP = self.SP.clip(min=1e-8)
-        # order train movies
-        if n_preprocessed_stim_versions > 0:
-            tmp_movies_shape = list(movie_train.shape)
-            tmp_movies_shape[-1] += 4*n_preprocessed_stim_versions
-            tmp_movies = np.zeros(tmp_movies_shape)
-            for i,ind in enumerate(movie_ordering):
-                tmp_movies[i*self.clip_length:(i+1)*self.clip_length, :, :, :2] = \
-                    movie_train[ind*self.clip_length:(ind+1)*self.clip_length]
-            for i, path in enumerate(luminance_paths_train):
-                tmp_movies[:, :, :, 2*i+2:2*i+4] = \
-                    np.load(path)[seq_idx, :]
-            tmp_idx = 2*i+4
-            for i, path in enumerate(contrast_paths_train):
-                tmp_movies[:, :, :, 2*i+tmp_idx:2*i+tmp_idx+2] = \
-                    np.load(path)[seq_idx,:]
-
-            test_shape = list(movie_test.shape)
-            test_shape[-1] += 4*n_preprocessed_stim_versions
-            test_shape[0] = 2*test_shape[0]
-            tmp_test_movies = np.zeros(test_shape)
-            tmp_test_movies[:movie_test.shape[0], :, :, :2] = movie_test
-            tmp_test_movies[movie_test.shape[0]:, :, :, :2] = movie_test
-
-            for i, path in enumerate(luminance_paths_test):
-                tmp_test_movies[:, :, :, 2*i+2:2*i+4] = \
-                    np.load(path)[seq_idx, :]
-            tmp_idx = 2 * i + 4
-            for i, path in enumerate(contrast_paths_test):
-                tmp_test_movies[:, :, :, 2 * i + tmp_idx:2 * i + tmp_idx + 2] = \
-                    np.load(path)[seq_idx, :]
-            self.movie_test = np.reshape(tmp_test_movies,
-                                         [2,
-                                         self.clip_length * 5,
-                                         self.px_y,
-                                         self.px_x,
-                                         self.channels])  # BDHWC
+        if not noise:
+            self.signal_variance = np.var(self.responses_test,0)
+            self.noise_variance = np.mean(np.var(self.test_responses_by_trial,1)/3,1)#divided by three repeats
+            self.total_variance = self.signal_variance + self.noise_variance
+            self.SNR = self.signal_variance / self.noise_variance
         else:
-            tmp_movies = np.zeros_like(movie_train)
-            for i,ind in enumerate(movie_ordering):
-                tmp_movies[i*self.clip_length:(i+1)*self.clip_length] = movie_train[ind*self.clip_length:(ind+1)*self.clip_length]
+            self.total_variance = np.var(self.responses_test,0)
 
-            self.movie_test = np.reshape(movie_test,
-                                         [1,self.clip_length*5,self.px_y,
-                                          self.px_x, self.channels])#BDHWC
-        self.movie_train = tmp_movies
+        if noise:
+            self.snr_ind = np.full(self.num_neurons,True)
+            self.input_shape = [None, None, self.px_y, self.px_x, self.channels]
+        else:
+            # filter out too low SNR
+            snr_ind = self.SNR > snr_tresh
+            self.num_neurons = np.sum(snr_ind)
+            self.input_shape = [None, None, self.px_y, self.px_x, self.channels]
+            self.output_shape = [None, None, self.num_neurons]
+            self.responses_train = self.responses_train[:, snr_ind]
+            self.responses_test = self.responses_test[:, snr_ind]
+            self.test_responses_for_oracle = self.test_responses_for_oracle[snr_ind]
+            self.test_responses_by_trial = self.test_responses_by_trial[snr_ind]
+            self.total_variance = self.total_variance[snr_ind]
+            self.noise_variance = self.noise_variance[snr_ind]
+            self.signal_variance = self.signal_variance[snr_ind]
+            self.SNR = self.SNR[snr_ind]
+            self.snr_ind = snr_ind
+
+        if noise:
+            self.movie_train = movie_train
+            self.movie_test = movie_test
+        else:
+            # CC_norm (Schoppe &al, 2016)
+            self.SP = (np.var(np.sum(self.test_responses_by_trial, 1), 1) -
+                       np.sum(np.var(self.test_responses_by_trial, 2), 1)) / (
+                      3 * (3 - 1))
+            self.SP = self.SP.clip(min=1e-8)
+            # order train movies
+            if n_preprocessed_stim_versions > 0:
+                tmp_movies_shape = list(movie_train.shape)
+                tmp_movies_shape[-1] += 4*n_preprocessed_stim_versions
+                tmp_movies = np.zeros(tmp_movies_shape)
+                for i,ind in enumerate(movie_ordering):
+                    tmp_movies[i*self.clip_length:(i+1)*self.clip_length, :, :, :2] = \
+                        movie_train[ind*self.clip_length:(ind+1)*self.clip_length]
+                for i, path in enumerate(luminance_paths_train):
+                    tmp_movies[:, :, :, 2*i+2:2*i+4] = \
+                        np.load(path)[seq_idx, :]
+                tmp_idx = 2*i+4
+                for i, path in enumerate(contrast_paths_train):
+                    tmp_movies[:, :, :, 2*i+tmp_idx:2*i+tmp_idx+2] = \
+                        np.load(path)[seq_idx,:]
+
+                test_shape = list(movie_test.shape)
+                test_shape[-1] += 4*n_preprocessed_stim_versions
+                test_shape[0] = 2*test_shape[0]
+                tmp_test_movies = np.zeros(test_shape)
+                tmp_test_movies[:movie_test.shape[0], :, :, :2] = movie_test
+                tmp_test_movies[movie_test.shape[0]:, :, :, :2] = movie_test
+
+                for i, path in enumerate(luminance_paths_test):
+                    tmp_test_movies[:, :, :, 2*i+2:2*i+4] = \
+                        np.load(path)[seq_idx, :]
+                tmp_idx = 2 * i + 4
+                for i, path in enumerate(contrast_paths_test):
+                    tmp_test_movies[:, :, :, 2 * i + tmp_idx:2 * i + tmp_idx + 2] = \
+                        np.load(path)[seq_idx, :]
+                self.movie_test = np.reshape(tmp_test_movies,
+                                             [2,
+                                             self.clip_length * 5,
+                                             self.px_y,
+                                             self.px_x,
+                                             self.channels])  # BDHWC
+            else:
+                tmp_movies = np.zeros_like(movie_train)
+                for i,ind in enumerate(movie_ordering):
+                    tmp_movies[i*self.clip_length:(i+1)*self.clip_length] = movie_train[ind*self.clip_length:(ind+1)*self.clip_length]
+
+                self.movie_test = np.reshape(movie_test,
+                                             [1,self.clip_length*5,self.px_y,
+                                              self.px_x, self.channels])#BDHWC
+            self.movie_train = tmp_movies
 
         # calculate STA
         # self.sta_space, self.sta_time = self.STA(self.movie_train,self.responses_train)
 
         # validation split
-        self.movie_val = np.zeros((NUM_VAL_CLIPS, self.clip_length, self.px_y, self.px_x, self.channels))#BDHW
-        self.responses_val = np.zeros([NUM_VAL_CLIPS,self.clip_length,self.num_neurons])#BDN
-        inv_order = np.argsort(movie_ordering)
-        for i,ind1 in enumerate(VAL_CLIP_IDX):
-            ind2 = inv_order[ind1]
-            self.movie_val[i] = self.movie_train[ind2*self.clip_length:(ind2+1)*self.clip_length]
-            self.responses_val[i] = self.responses_train[ind2*self.clip_length:(ind2+1)*self.clip_length,:]
+        if noise:
+            self.movie_val = np.zeros((NUM_NOISE_VAL_CLIPS, self.clip_length, self.px_y, self.px_x, self.channels))#BDHW
+            self.responses_val = np.zeros([NUM_NOISE_VAL_CLIPS,self.clip_length,self.num_neurons])#BDN
+            for i,ind in enumerate(val_clip_idx):
+                self.movie_val[i] = self.movie_train[ind*self.clip_length:(ind+1)*self.clip_length]
+                self.responses_val[i] = self.responses_train[ind*self.clip_length:(ind+1)*self.clip_length,:]
 
-        # val and test set in right shapes
-        #self.movie_test = np.reshape(tmp_test_movies,[2,self.clip_length*5,self.px_y,self.px_x, self.channels])#BDHWC
-        self.movie_val = np.reshape(self.movie_val,[NUM_VAL_CLIPS,self.clip_length,self.px_y,self.px_x, self.channels])#BDHWC
-        self.responses_test = np.reshape(self.responses_test,[1,-1,self.num_neurons])#BDN
+            # val and test set in right shapes
+            #self.movie_test = np.reshape(tmp_test_movies,[2,self.clip_length*5,self.px_y,self.px_x, self.channels])#BDHWC
+            self.movie_val = np.reshape(self.movie_val,[NUM_NOISE_VAL_CLIPS,self.clip_length,self.px_y,self.px_x, self.channels])#BDHWC
+            self.responses_test = np.reshape(self.responses_test,[1,-1,self.num_neurons])#BDN
+        else:
+            self.movie_val = np.zeros((NUM_VAL_CLIPS, self.clip_length, self.px_y, self.px_x, self.channels))#BDHW
+            self.responses_val = np.zeros([NUM_VAL_CLIPS,self.clip_length,self.num_neurons])#BDN
+            inv_order = np.argsort(movie_ordering)
+            for i,ind1 in enumerate(val_clip_idx):
+                ind2 = inv_order[ind1]
+                self.movie_val[i] = self.movie_train[ind2*self.clip_length:(ind2+1)*self.clip_length]
+                self.responses_val[i] = self.responses_train[ind2*self.clip_length:(ind2+1)*self.clip_length,:]
+
+            # val and test set in right shapes
+            #self.movie_test = np.reshape(tmp_test_movies,[2,self.clip_length*5,self.px_y,self.px_x, self.channels])#BDHWC
+            self.movie_val = np.reshape(self.movie_val,[NUM_VAL_CLIPS,self.clip_length,self.px_y,self.px_x, self.channels])#BDHWC
+            self.responses_test = np.reshape(self.responses_test,[1,-1,self.num_neurons])#BDN
 
         # for train: find sequences of clips (uniterrupted by val clips)
         start_idx = 0
@@ -238,7 +287,7 @@ class Dataset:
         self.seq_start_idx = []
         self.seq_length = []
         for ind in movie_ordering: # over clips
-            if ind in VAL_CLIP_IDX:
+            if ind in val_clip_idx:
                 length = current_idx - start_idx
                 if length > 0:
                     self.seq_start_idx.append(start_idx)
@@ -258,7 +307,7 @@ class Dataset:
             self.seq_start_idx = []
             self.seq_length = []
             for ind in movie_ordering: # over clips
-                if ind not in VAL_CLIP_IDX:
+                if ind not in val_clip_idx:
                     self.seq_start_idx.append(start_idx)
                     self.seq_length.append(length)
                 start_idx += self.clip_length
@@ -267,7 +316,7 @@ class Dataset:
             self.movie_val = self.movie_val[:, self.adapt:]
             self.responses_test = self.responses_test[:, self.adapt:]
             self.responses_val = self.responses_val[:, self.adapt:]
-        
+
         self.current_chunk_idx = 1e10
         self.chunk_start_idx = []
 
@@ -413,50 +462,54 @@ class MultiDataset:
         self.num_clips = self.scans[0].num_clips
         #different between scans
         self.num_rois = []
-        self.noise_variance = []
-        self.signal_variance = []
         self.total_variance = []
-        self.SNR = []
-        self.SP = []
-        self.oracle = []
         self.movie_train = []
         self.responses_train = []
         self.responses_test = []
         self.responses_val = []
         #self.sta_space = []
         #self.sta_time = []
-        self.test_responses_by_trial = []
-        self.test_responses_for_oracle =[]
+        if len(self.random_sequences)>0:
+            self.noise_variance = []
+            self.signal_variance = []
+            self.SNR = []
+            self.SP = []
+            self.oracle = []
+            self.test_responses_by_trial = []
+            self.test_responses_for_oracle =[]
         for scan in self.scans:
             self.num_rois.append(scan.num_neurons)
-            self.noise_variance.append(scan.noise_variance)
-            self.signal_variance.append(scan.signal_variance)
             self.total_variance.append(scan.total_variance)
-            self.SNR.append(scan.SNR)
-            self.SP.append(scan.SP)
-            self.oracle.append(scan.oracle)
             self.movie_train.append(scan.movie_train)
             self.responses_train.append(scan.responses_train)
             self.responses_test.append(scan.responses_test)
             self.responses_val.append(scan.responses_val)
-            self.test_responses_by_trial.append(scan.test_responses_by_trial)
-            self.test_responses_for_oracle.append(scan.test_responses_for_oracle)
+            if len(self.random_sequences)>0:
+                self.noise_variance.append(scan.noise_variance)
+                self.signal_variance.append(scan.signal_variance)
+                self.SNR.append(scan.SNR)
+                self.SP.append(scan.SP)
+                self.oracle.append(scan.oracle)
+                self.test_responses_by_trial.append(scan.test_responses_by_trial)
+                self.test_responses_for_oracle.append(scan.test_responses_for_oracle)
         #    self.sta_space.append(scan.sta_space)
         #    self.sta_time.append(scan.sta_time)
         self.num_neurons = np.sum(self.num_rois)
         self.output_shape = [None,None,np.sum(self.num_neurons)]
-        self.noise_variance = np.concatenate(self.noise_variance)
-        self.signal_variance = np.concatenate(self.signal_variance)
         self.total_variance = np.concatenate(self.total_variance)
-        self.SNR = np.concatenate(self.SNR)
-        self.SP = np.concatenate(self.SP)
-        self.oracle = np.concatenate(self.oracle)
+        if len(self.random_sequences)>0:
+            self.noise_variance = np.concatenate(self.noise_variance)
+            self.signal_variance = np.concatenate(self.signal_variance)
+            self.SNR = np.concatenate(self.SNR)
+            self.SP = np.concatenate(self.SP)
+            self.oracle = np.concatenate(self.oracle)
+            self.test_responses_by_trial = np.concatenate(self.test_responses_by_trial, axis=0)#NDR
+            self.test_responses_for_oracle = np.concatenate(self.test_responses_for_oracle, axis=0)#NDR
         self.movie_train = np.stack(self.movie_train, axis=0)#STHWC
         self.responses_train = np.concatenate(self.responses_train, axis=1)#TN
         self.responses_test = np.concatenate(self.responses_test, axis=2)#TBN
         self.responses_val = np.concatenate(self.responses_val, axis=2)#TBN
-        self.test_responses_by_trial = np.concatenate(self.test_responses_by_trial, axis=0)#NDR
-        self.test_responses_for_oracle = np.concatenate(self.test_responses_for_oracle, axis=0)#NDR
+
         #self.sta_space = np.concatenate(self.sta_space,0)#NWH
         #self.sta_time = np.concatenate(self.sta_time,0)#NT
 
