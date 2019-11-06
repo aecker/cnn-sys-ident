@@ -127,7 +127,7 @@ class Trainer:
         include=np.var(responses,axis=1)>1e-5
         return np.mean(1-np.mean((responses-predictions)**2,axis=1)[include]/np.var(responses,axis=1)[include])
 
-    def compute_test_var_expl(self):
+    def compute_test_var_expl(self, average=False):
         with self.graph.as_default():
             inputs, responses = self.data.test()
             feed_dict = {self.base.inputs: inputs,
@@ -135,7 +135,11 @@ class Trainer:
                          self.base.is_training: False}
             predictions = self.session.run(self.model.predictions, feed_dict)
         responses = crop_responses(predictions,responses)
-        return np.mean(1-np.mean((responses-predictions)**2,axis=1)/np.var(responses,axis=1))
+        if average:
+            
+            return np.mean(1-np.mean((responses-predictions)**2,axis=1)/np.var(responses,axis=1))
+        else:
+            return 1-np.mean((responses-predictions)**2,axis=1)/np.var(responses,axis=1)[0]
 
     def compute_val_loss(self, error_fn=poisson):
         with self.graph.as_default():
