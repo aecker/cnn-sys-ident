@@ -141,7 +141,6 @@ class MultiDatasetWrapper:
                              "Test_joined.tif",
                              STIMULUS_PATH=stim_path,
                              downsample_size=downsample_size,
-                             downsample_this=False,
                              mouse_cam=color_channels)
         elif self.key["stim_id"] == 0:
             stim_framerate = (Stimulus() & 'stim_id = {}'.format(
