@@ -91,6 +91,8 @@ class MultiDatasetWrapper:
             stim_path = stim_path + eye + "/"
         elif projname.find("BC") >= 0:
             stim_path = stim_path
+        elif projname == "ret2dlgn":
+            stim_path = stim_path
         else:
             raise Exception('Cannot identify stimulus location '
                             'for experiment from project ' + projname)
@@ -142,6 +144,13 @@ class MultiDatasetWrapper:
                              STIMULUS_PATH=stim_path,
                              downsample_size=downsample_size,
                              mouse_cam=color_channels)
+        elif (self.key["stim_id"]==4):
+            movie_train, movie_test, random_sequences = \
+                load_stimuli("movies_train.tif",
+                             "movies_test.tif",
+                             STIMULUS_PATH=stim_path,
+                             downsample_size=downsample_size,
+                             mouse_cam=color_channels)
         elif self.key["stim_id"] == 0:
             stim_framerate = (Stimulus() & 'stim_id = {}'.format(
                 self.key["stim_id"])
@@ -173,6 +182,11 @@ class MultiDatasetWrapper:
                 filename = h.split('/')[-1]
                 scan_sequence_idxs[i] = \
                     int(re.search("MC(.+?).h5", filename).group(1))
+        elif self.key["stim_id"] == 4:
+            for i, h in enumerate(header_paths):
+                filename = h.split('/')[-1]
+                scan_sequence_idxs[i] = \
+                    int(re.search("nm(.+?).h5", filename).group(1))
 
         fields = (Presentation() & key).fetch("field_id")
         roi_ids_all = [[] for _ in fields]
@@ -203,7 +217,7 @@ class MultiDatasetWrapper:
                 (Traces() * Presentation() & keys_field[i]).fetch("traces_times")
             triggertimes = \
                 (Presentation() & keys_field[i]).fetch1("triggertimes")
-            if self.key["stim_id"] == 5:
+            if (self.key["stim_id"] == 5) or (self.key["stim_id"] == 4):
                 #if movie, upsample triggertimes to get 1 trigger per frame, (instead of just 1 trigger per sequence)
                 upsampled_triggertimes = \
                     [np.linspace(t, t + 4.9666667, 5 * 30)
@@ -254,13 +268,14 @@ class MultiDatasetWrapper:
                np.logical_and((qual_idxs_chirp > quality_threshold_chirp),
                               (qual_idxs_ds > quality_threshold_ds)))
 
-            if self.key["stim_id"] == 5:
+            if (self.key["stim_id"] == 5) or (self.key["stim_id"]==4):
                 responses = np.zeros((num_neurons, 150 * 123))
                 for n in range(num_neurons):
                     responses[n, :] = \
                         self.interpolate_weights(tracestimes[n],
                                                  traces[n],
                                                  upsampled_triggertimes)
+                    responses[n, :] = responses[n, :] / np.std(responses[n, :])  # normalize response std
             elif self.key["stim_id"] == 0:
                 responses = np.zeros((num_neurons, stim.shape[0]))
                 for n in range(num_neurons):
@@ -294,6 +309,7 @@ class MultiDatasetWrapper:
         self.multi_dataset = multi_dataset
         self.roi_masks = roi_masks
         self.roi_ids = roi_ids_all
+        self.movie_qis = qual_idxs_movie
 
 
 # %%
