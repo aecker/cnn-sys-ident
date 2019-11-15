@@ -156,10 +156,10 @@ class MultiDatasetWrapper:
             reshaped = stim.reshape(stim.shape[0], -1)
             repeated = np.repeat(reshaped, [up_factor]*stim.shape[0], axis=0)
             stim = repeated.reshape(repeated.shape[0], 15, 20)
+            stim -= np.mean(stim) # set stimululs mean to zero
             #split into 10 % test, 80 % train, 10 % test
-            movie_train = stim[150*up_factor:-150*up_factor]
-            movie_test = np.vstack(
-                (stim[:150*up_factor, :, :], stim[-150*up_factor:, :, :]))
+            movie_train = stim[300*up_factor:, :, :]
+            movie_test = stim[:300*up_factor, :, :]
             #insert channel dimension
             movie_train = np.expand_dims(movie_train, -1)
             movie_test = np.expand_dims(movie_test, -1)
@@ -268,6 +268,7 @@ class MultiDatasetWrapper:
                         self.interpolate_weights(tracestimes[n],
                                                  traces[n],
                                                  upsampled_triggertimes)
+                    responses[n, :] = responses[n, :] / np.std(responses[n, :]) # normalize response std
 
             responses_all[i] = responses[quality_mask]
             roi_ids_all[i] = roi_ids[quality_mask]
