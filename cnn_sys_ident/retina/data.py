@@ -140,9 +140,8 @@ class Dataset:
             self.channels += 4*n_preprocessed_stim_versions #(luminance + contrast) * color_channels = 4
         #split into train and (averaged) test responses
         if noise:
-            self.responses_test = np.vstack(
-                (responses[:,:5*self.clip_length], responses[:,-5*self.clip_length:])).T
-            self.responses_train = responses[:,5*self.clip_length:-5*self.clip_length].T
+            self.responses_test = responses[:,:10*self.clip_length].T
+            self.responses_train = responses[:,10*self.clip_length:].T
         else:
             self.responses_test = np.zeros((5*self.clip_length,self.num_neurons))#DN
             self.responses_train = np.zeros((self.num_clips*self.clip_length,self.num_neurons))#DN

@@ -423,50 +423,64 @@ class StackedFactorizedConv3dCore:
                             rel_sparse_weight)):
                     with tf.variable_scope('conv{}'.format(i), reuse=tf.AUTO_REUSE):
                         # temporal
-                        #filter: [filter_depth, filter_height, filter_width, in_channels, out_channels]
+                        # hack
+#                         print('TEMPORAL WEIGHTS INITIALIZATION FIXED TO FILTERS FROM BASELINE MODEL!')
+#                         tp_weight_init = np.load('../../../RF_init_test/baseline_tp_w.npy')
+#                         tp_weight_init = tp_weight_init.reshape(tp_weight_init.shape[0],1,1,1,tp_weight_init.shape[1])
+                        # filter: [filter_depth, filter_height, filter_width, in_channels, out_channels]
+#                         print('CHANGED INIT MEAN OF TEMPORAL WEIGHTS!')
                         self.weights_temporal.append(tf.get_variable(
                                            name='weights_temporal_{}'.format(i),
                                            shape=[fs_t,1,1,x.shape[-1],int(nf)],
+#                                            initializer=tf.constant_initializer(tp_weight_init)))
+#                                            initializer=tf.truncated_normal_initializer(mean=0.01, stddev=0.01)))
                                            initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.01)))
 
                         # spatial
+                        # hack
+#                         print('SPATIAL WEIGHTS INITIALIZATION FIXED TO FILTERS FROM BASELINE MODEL!')
+#                         sp_weight_init = np.load('../../../RF_init_test/baseline_sp_w.npy')
+#                         sp_weight_init = sp_weight_init.reshape(1,sp_weight_init.shape[0],sp_weight_init.shape[1],1,sp_weight_init.shape[2])
+                        print('RANDOM SPATIAL FILTER INIT')
                         self.weights_spatial.append(tf.get_variable(
                                           name='weights_spatial_{}'.format(i),
                                           shape=[1,fs_s,fs_s,x.shape[-1],int(nf)],
+#                                           initializer=tf.constant_initializer(sp_weight_init)))
                                           initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.01)))
 
-                    # combined
-                    self.W_combined = tf.einsum('dabio,chwio->dhwio',
-                                           self.weights_temporal[-1],
-                                           self.weights_spatial[-1],
-                                           name='weights_combined_{}'.format(i)
-                    )
-                    
-#                     weights_mean=tf.math.reduce_mean(self.W_combined,axis=[0,1,2,3])
-#                     self.W_combined = tf.subtract(self.W_combined,weights_mean)
-#                     self.W_combined = tf.divide(self.W_combined,100*tf.math.reduce_std(self.W_combined,axis=[0,1,2,3]))
-#                     self.W_combined = tf.add(self.W_combined,weights_mean)
-
-                    if nonzero_padding:
-                        x = tf.pad(x,[[0,0],[0,0],[fs_s//2,fs_s//2],[fs_s//2,fs_s//2],[0,0]],mode='CONSTANT',constant_values=padding_constant)
-
-                    # Convolution
-                    x = tf.nn.conv3d(
-                        input=x,
-                        filter=self.W_combined,
-                        strides=[int(st)]*5,
-                        padding=pd
-                    )
-                    x = tf.contrib.layers.batch_norm(
-                            inputs=x,
-                            decay=0.9,
-                            is_training=base.is_training,
+                        # combined
+                        self.W_combined = tf.einsum('dabio,chwio->dhwio',
+                                               self.weights_temporal[-1],
+                                               self.weights_spatial[-1],
+                                               name='weights_combined_{}'.format(i)
                         )
 
-                    if not (fn == 'none'):
-                        x = ACTIVATION_FN[fn](x)
+    #                     weights_mean=tf.math.reduce_mean(self.W_combined,axis=[0,1,2,3])
+    #                     self.W_combined = tf.subtract(self.W_combined,weights_mean)
+    #                     self.W_combined = tf.divide(self.W_combined,100*tf.math.reduce_std(self.W_combined,axis=[0,1,2,3]))
+    #                     self.W_combined = tf.add(self.W_combined,weights_mean)
 
-                    self.conv.append(x)
+                        if nonzero_padding:
+                            x = tf.pad(x,[[0,0],[0,0],[fs_s//2,fs_s//2],[fs_s//2,fs_s//2],[0,0]],mode='CONSTANT',constant_values=padding_constant)
+
+                        # Convolution
+                        x = tf.nn.conv3d(
+                            input=x,
+                            filter=self.W_combined,
+                            strides=[int(st)]*5,
+                            padding=pd
+                        )
+                        x = tf.contrib.layers.batch_norm(
+                                inputs=x,
+                                decay=0.9,
+                                scale=False,
+                                is_training=base.is_training,
+                            )
+
+                        if not (fn == 'none'):
+                            x = ACTIVATION_FN[fn](x)
+
+                        self.conv.append(x)
 
                     # regularization
                     if not(reuse):

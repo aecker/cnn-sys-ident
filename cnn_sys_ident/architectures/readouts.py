@@ -325,8 +325,9 @@ class SpatialXFeature3dJointL1Readout:
                  data,
                  inputs,
                  positive_feature_weights=False,
-                 mask_sparsity=0.01,
-                 feature_sparsity=0.001,
+#                  mask_sparsity=0.01,
+#                  feature_sparsity=0.001,
+                 readout_sparsity=0.01,
                  init_masks='sta',
                  scope='readout',
                  reuse=False,
@@ -375,17 +376,22 @@ class SpatialXFeature3dJointL1Readout:
 
                 # L1 regularization for readout layer
                 # summed, scales with neurons <<<< YOU WANT THIS!!!
-                self.mask_reg = mask_sparsity * tf.reduce_sum(tf.abs(self.masks))
-                self.feature_reg = feature_sparsity * tf.reduce_sum(tf.abs(self.feature_weights))
-                self.readout_reg = self.mask_reg + self.feature_reg
+                self.readout_reg = readout_sparsity * tf.reduce_sum(
+                    tf.reduce_sum(tf.abs(self.masks), [1, 2]) * \
+                    tf.reduce_sum(tf.abs(self.feature_weights), 1))
+
+#                 self.mask_reg = mask_sparsity * tf.reduce_sum(tf.abs(self.masks))
+#                 self.feature_reg = feature_sparsity * tf.reduce_sum(tf.abs(self.feature_weights))
+#                 self.readout_reg = self.mask_reg + self.feature_reg
                 tf.losses.add_loss(self.readout_reg, tf.GraphKeys.REGULARIZATION_LOSSES)
 
                 # bias and output nonlinearity
                 _, responses = data.train()
                 if nonlinearity:
-                    bias_init = 0.5 * inv_soft_threshold(responses.mean(axis=0))
+#                     bias_init = 0.5 * inv_soft_threshold(responses.mean(axis=0))
+                    bias_init = inv_soft_threshold(responses.mean(axis=0))
                 else:
-                    bias_init = - responses.mean(axis=0)
+                    bias_init = responses.mean(axis=0)
                 self.biases = tf.get_variable(
                     'biases',
                     shape=[num_neurons],
@@ -395,6 +401,28 @@ class SpatialXFeature3dJointL1Readout:
                 else:
                     self.output = tf.identity(self.h + self.biases, name='output')
                 
+
+class ConstantReadout:
+    def __init__(self,
+                 base,
+                 data,
+                 inputs,
+                 scope='readout',
+                 reuse=False,
+                 **kwargs):
+        with base.tf_session.graph.as_default():
+            with tf.variable_scope(scope, reuse=reuse):
+                shape = tf.shape(inputs)
+                num_neurons = data.num_neurons
+                _, responses = data.train()
+                self.readout_reg = tf.constant(0)
+                self.output = tf.constant(
+                    responses.mean(axis=0),
+                    dtype=tf.float32,
+                    name='output',
+                    shape=[1, 1, num_neurons]) + inputs[:,:-20,0:1,0,0] * 0
+                print(self.output.shape)
+
 
 class SpatialXFeature3dL1Readout:
     def __init__(self,
@@ -529,6 +557,33 @@ class SpatialXFeature3dL1Readout:
                     self.output += self.biases2
 
 
+def smoothness_regularizer_1d_(W, weight=1.0):
+    with tf.variable_scope('smoothness'):
+        lap = tf.constant([-1, 2, -1], shape=(3, 1, 1, 1), dtype=tf.float32)
+        W = tf.expand_dims(W, 1)
+        num_filters = W.get_shape().as_list()[2]
+        W_lap = tf.nn.depthwise_conv2d(tf.transpose(W, perm=[3, 0, 1, 2]),
+                                       tf.tile(lap, [1, 1, num_filters, 1]),
+                                       strides=[1, 1, 1, 1], padding='SAME')
+        penalty = tf.reduce_sum(tf.square(W_lap))
+        penalty = tf.identity(weight * penalty, name='penalty')
+        tf.add_to_collection('smoothness_regularizer_1d', penalty)
+        return penalty
+
+def smoothness_regularizer_2d_(W, weight=1.0):
+    with tf.variable_scope('smoothness'):
+        lap = tf.constant([[0.25, 0.5, 0.25], [0.5, -3.0, 0.5], [0.25, 0.5, 0.25]])
+        lap = tf.expand_dims(tf.expand_dims(lap, 2), 3)
+        num_filters = W.get_shape().as_list()[2]
+        W_lap = tf.nn.depthwise_conv2d(tf.transpose(W, perm=[3, 0, 1, 2]),
+                                       tf.tile(lap, [1, 1, num_filters, 1]),
+                                       strides=[1, 1, 1, 1], padding='SAME')
+        penalty = tf.reduce_sum(tf.square(W_lap))
+        penalty = tf.identity(weight * penalty, name='penalty')
+        tf.add_to_collection('smoothness_regularizer_2d', penalty)
+        return penalty
+
+
 class FactorizedConv3dReadout:
     def __init__(self,
                  base,
@@ -539,6 +594,7 @@ class FactorizedConv3dReadout:
                  conv_smooth_weight_spatial=0.001,
                  conv_smooth_weight_temporal=0.001,
                  conv_sparse_weight=0.001,
+                 l2=0.0,
                  nonlinearity=True,
                  final_bias=False,
                  scope='core',
@@ -556,9 +612,14 @@ class FactorizedConv3dReadout:
 
                 #filter: [filter_depth, filter_height, filter_width, in_channels, out_channels]
                 # spatial
+                # hack
+#                 print('SPATIAL WEIGHTS INITIALIZATION FIXED TO FILTERS FROM BASELINE MODEL!')
+#                 sp_weight_init = np.load('../../../RF_init_test/noise_RF_'+scope+'.npy')
+#                 sp_weight_init = sp_weight_init.reshape(1,sp_weight_init.shape[0],sp_weight_init.shape[1],1,sp_weight_init.shape[2])
                 self.weights_spatial=tf.get_variable(
                                     name='readout_weights_spatial',
                                     shape=[1, num_px_y, num_px_x,inputs.shape[-1],num_neurons],
+#                                     initializer=tf.constant_initializer(sp_weight_init))
                                     initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.01))
 
                 #temporal
@@ -593,14 +654,18 @@ class FactorizedConv3dReadout:
                                 self.weights_spatial[0,:,:,:,:],
                                 conv_sparse_weight
                     )
-                    self.reg_loss += smoothness_regularizer_1d(
+                    print('TEMPORARILY CHANGED SMOOTHNESS REGULARIZER!!!')
+#                     self.reg_loss += smoothness_regularizer_1d(
+                    self.reg_loss += smoothness_regularizer_1d_(
                                 self.weights_temporal[:,0,0,:,:],
                                 conv_smooth_weight_temporal
                     )
-                    self.reg_loss += smoothness_regularizer_2d(
+#                     self.reg_loss += smoothness_regularizer_2d(
+                    self.reg_loss += smoothness_regularizer_2d_(
                                 self.weights_spatial[0,:,:,:,:],
                                 conv_smooth_weight_spatial
                     )
+                    self.reg_loss += l2 * tf.reduce_sum(tf.square(self.W_combined))
                     tf.losses.add_loss(self.reg_loss, tf.GraphKeys.REGULARIZATION_LOSSES)
 
                 # bias and output nonlinearity
@@ -608,7 +673,7 @@ class FactorizedConv3dReadout:
                 if nonlinearity:
                     bias_init = 0.5 * inv_soft_threshold(responses.mean(axis=0))
                 else:
-                    bias_init = - responses.mean(axis=0)
+                    bias_init = responses.mean(axis=0)
                 self.biases = tf.get_variable(
                     'biases',
                     shape=[num_neurons],
@@ -655,16 +720,20 @@ class SpatialTransformerPooled3dReadout:
                 self.feature_weights = tf.get_variable(
                     'features',
                     shape=[num_neurons, num_features * (self._pool_steps + 1)],
+#                     initializer=tf.constant_initializer(0.001))
+                    # [AE] value seems way to high --> variance of output should be close to zero at init
                     initializer=tf.constant_initializer(1/num_features))
                 self.mask = tf.get_variable(
                     'mask',
                     shape=self.feature_weights.shape,
                     initializer=tf.ones_initializer)
 
-				
+				# [AE]: what's the mask here?
                 self.feature_weights *= self.mask
                 if positive_feature_weights:
                     self.feature_weights = tf.clip_by_value(self.feature_weights,0,np.infty)
+                    # [AE] I'd rather use absolute value than clipping
+#                     self.feature_weights = tf.abs(self.feature_weights)
                 self.grid = tf.clip_by_value(self.grid, -1, 1)
 				
                 self.z = tf.reshape(x,[-1,num_px_y,num_px_x,num_features])
@@ -681,15 +750,16 @@ class SpatialTransformerPooled3dReadout:
                 y = tf.reduce_sum(y * self.feature_weights, -1)
 		
 				# add regularization loss for the readout layer
-                self.feature_reg = feature_sparsity * tf.reduce_sum(tf.abs(self.feature_weights))
-                tf.losses.add_loss(self.feature_reg, tf.GraphKeys.REGULARIZATION_LOSSES)
+                self.reg_loss = feature_sparsity * tf.reduce_sum(tf.abs(self.feature_weights))
+                tf.losses.add_loss(self.reg_loss, tf.GraphKeys.REGULARIZATION_LOSSES)
 
                 # bias and output nonlinearity
                 _, responses = data.train()
                 if nonlinearity:
-                    bias_init = 0.5 * inv_soft_threshold(responses.mean(axis=0))
+#                     bias_init = 0.5 * inv_soft_threshold(responses.mean(axis=0))
+                    bias_init = inv_soft_threshold(responses.mean(axis=0))
                 else:
-                    bias_init = - responses.mean(axis=0)
+                    bias_init = responses.mean(axis=0)
                 self.biases = tf.get_variable(
                     'biases',
                     shape=[num_neurons],

@@ -22,6 +22,8 @@ class Trainer:
             self.total_loss = self.error + self.reg_loss
             self.train_step = tf.train.AdamOptimizer(
                 self.learning_rate).minimize(self.total_loss)
+#             self.train_step = tf.train.GradientDescentOptimizer(
+#                 self.learning_rate).minimize(self.total_loss)
             writer = tf.summary.FileWriter(logdir=self.base.tf_session.log_dir, graph=self.graph)
             writer.flush()
 
@@ -49,7 +51,7 @@ class Trainer:
                                  self.base.responses: res_batch,
                                  self.base.is_training: True,
                                  self.learning_rate: learning_rate}
-                    print('iteration:',iter_num)
+#                     print('iteration:',iter_num)
                     self.session.run([self.train_step, update_ops], feed_dict)
                     iter_num += 1
 
