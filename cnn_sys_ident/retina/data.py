@@ -83,6 +83,9 @@ def load_stimuli(train_movie_file,
     sd = movie_train.std().reshape((-1,1))
     zscore = lambda img: (img - m) / sd
     movie_train = zscore(movie_train)
+    m = movie_test.mean().reshape((-1, 1))
+    sd = movie_test.std().reshape((-1, 1))
+    zscore = lambda img: (img - m) / sd
     movie_test = zscore(movie_test)
 
     # load ordering of random sequences
