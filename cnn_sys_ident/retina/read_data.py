@@ -23,12 +23,51 @@ from schema.stimulus_schema import MovieQI
 
 # %%
 class MultiDatasetWrapper:
-    def __init__(self, experimenter, date, exp_num, stim_path, stim_id):
+    def __init__(self, experimenter, date, exp_num, stim_path, stim_id,
+                 field_id=[]):
         self.stim_path = stim_path
-        self.key = dict(experimenter=experimenter,
-                        date=date,
-                        exp_num=exp_num,
-                        stim_id=stim_id)
+        if type(experimenter) == list:
+            #several experiments
+            keys = []
+            all_params = [date, exp_num, stim_id, field_id]
+            n_exps = len(experimenter)
+            sid = stim_id[0]
+            assert all(len(el) == n_exps for el in all_params), \
+                "You have not passed the same number of parameters for each experiment"
+            assert all(id == sid for id in stim_id), \
+                "Stimuli are not the same for all experiments"
+            for params in zip(experimenter, date, exp_num, stim_id, field_id):
+                keys.append(self.gen_key(*params))
+            self.key = keys
+            self.n_exps = n_exps
+        else:
+            #only one experiment
+            self.key = [self.gen_key(
+                experimenter, date, exp_num, stim_id, field_id
+            )]
+            self.n_exps = 1
+
+    def gen_key(self, experimenter, date, exp_num, stim_id, field_id):
+        key = []
+        if len(field_id) > 0: # if the fields are specified, add only those
+            for fid in field_id:
+                key.append(dict(experimenter=experimenter,
+                                date=date,
+                                exp_num=exp_num,
+                                stim_id=stim_id,
+                                field_id=fid))
+        else: #otherwise add all fields
+            temp = dict(experimenter=experimenter,
+                                date=date,
+                                exp_num=exp_num,
+                                stim_id=stim_id,
+                        )
+            field_id = (Presentation() & temp).fetch("field_id")
+            for fid in field_id:
+                temp.update(dict(field_id=fid))
+                key.append(deepcopy(temp))
+        return key
+
 
     def interpolate_weights(self, orig_times, orig_data, new_times):
         data_interp = interp1d(
@@ -51,6 +90,7 @@ class MultiDatasetWrapper:
                          adapt=0,
                          target_fs=15
                          ):
+
         if detrend_traces:
             detrend_param_key = 'detrend_param_set_id = {}'.format(
                 detrend_param_set_id
@@ -81,8 +121,8 @@ class MultiDatasetWrapper:
                            detrend_param_set_id
                           ))
             detrend_param_key = 'detrend_param_set_id = 1'
-        key = self.key
-        roi_masks = (Field().RoiMask() & key).fetch("roi_mask")
+
+        key = self.key[0][0]
         stim_path = self.stim_path
         projname = (ExpInfo() & key).fetch1('projname')
         if projname.find("RGC") >= 0:
@@ -135,7 +175,7 @@ class MultiDatasetWrapper:
             luminance_paths_test.append(luminance_path_test)
             contrast_paths_train.append(contrast_path_train)
             contrast_paths_test.append(contrast_path_test)
-        if self.key["stim_id"] == 5:
+        if key["stim_id"] == 5:
             #movie_train shape: (16200, 56, 56, 2)
             #movie_test shape: (750, 56, 56, 2)
             movie_train, movie_test, random_sequences = \
@@ -144,21 +184,21 @@ class MultiDatasetWrapper:
                              STIMULUS_PATH=stim_path,
                              downsample_size=downsample_size,
                              mouse_cam=color_channels)
-        elif (self.key["stim_id"]==4):
+        elif key["stim_id"]==4:
             movie_train, movie_test, random_sequences = \
                 load_stimuli("movies_train.tif",
                              "movies_test.tif",
                              STIMULUS_PATH=stim_path,
                              downsample_size=downsample_size,
                              mouse_cam=color_channels)
-        elif self.key["stim_id"] == 0:
+        elif key["stim_id"] == 0:
             stim_framerate = (Stimulus() & 'stim_id = {}'.format(
-                self.key["stim_id"])
+                key["stim_id"])
                     ).fetch1("framerate")
             assert target_fs % stim_framerate == 0, "target frame rate is not an integer multiple of native stimulus framerate"
             up_factor = int(target_fs // stim_framerate)  # determine by how much the trigger should be upsampled
             stim = (Stimulus() & 'stim_id = {}'.format(
-                self.key["stim_id"])
+                key["stim_id"])
                     ).fetch1("stimulus_trace") #shape (15, 20, 1500)
             stim = stim.transpose(-1, 0, 1)
             #repeat every stimulus frame up_factor times
@@ -174,130 +214,165 @@ class MultiDatasetWrapper:
             movie_test = np.expand_dims(movie_test, -1)
             random_sequences = []
 
-        header_paths = (Presentation() & key).fetch('h5_header')
-        n_scans = len(header_paths)
-        scan_sequence_idxs = np.zeros(n_scans, dtype=int)
-        if self.key["stim_id"] == 5:
-            for i, h in enumerate(header_paths):
-                filename = h.split('/')[-1]
-                scan_sequence_idxs[i] = \
-                    int(re.search("MC(.+?).h5", filename).group(1))
-        elif self.key["stim_id"] == 4:
-            for i, h in enumerate(header_paths):
-                filename = h.split('/')[-1]
-                scan_sequence_idxs[i] = \
-                    int(re.search("nm(.+?).h5", filename).group(1))
+        roi_ids_final = [[] for _ in range(self.n_exps)]
+        movie_qis_final = [[] for _ in range(self.n_exps)]
+        responses_final = [[] for _ in range(self.n_exps)]
+        num_rois_final = [[] for _ in range(self.n_exps)]
+        restriction_final = [[] for _ in range(self.n_exps)]
+        keys_field_final = [[] for _ in range(self.n_exps)]
+        scan_sequence_final = [[] for _ in range(self.n_exps)]
+        depths_final = [[] for _ in range(self.n_exps)]
+        roi_masks_final = [[] for _ in range(self.n_exps)]
+        n_scans = 0
+        for exp, keys in enumerate(self.key):
+            n_fields = len(keys)
+            roi_ids_all = [[] for _ in range(n_fields)]
+            movie_qis_all = [[] for _ in range(n_fields)]
+            responses_all = [[] for _ in range(n_fields)]
+            num_rois_all = [[] for _ in range(n_fields)]
+            restriction = [[] for _ in range(n_fields)]
+            keys_field = [{} for _ in range(n_fields)]
+            roi_masks = [[] for _ in range(n_fields)]
+            depths = [[] for _ in range(n_fields)]
+            scan_sequence_idxs = np.zeros(n_fields, dtype=int)
+            for i, field_key in enumerate(keys):
+                restriction[i] = field_key
+                roi_masks[i] = (Field().RoiMask() & field_key).fetch1("roi_mask")
+                header_path = (Presentation() & field_key).fetch1('h5_header')
+                n_scans += 1
+                if field_key["stim_id"] == 5:
+                    filename = header_path.split('/')[-1]
+                    scan_sequence_idxs[i] = \
+                        int(re.search("MC(.+?).h5", filename).group(1))
+                elif field_key["stim_id"] == 4:
+                    filename = header_path.split('/')[-1]
+                    #TODO: find out how to search case-insensitive
+                    try:
+                        scan_sequence_idxs[i] = \
+                            int(re.search("nm(.+?).h5", filename).group(1))
+                    except:
+                        scan_sequence_idxs[i] = \
+                            int(re.search("NM(.+?).h5", filename).group(1))
+                if detrend_traces:
+                    traces = \
+                        (DetrendTraces() * Presentation() &
+                         field_key & detrend_param_key).fetch("detrend_traces")
+                    raw_traces = \
+                        (Traces() * Presentation() &
+                         field_key).fetch("traces")
+                    assert len(traces) == len(raw_traces), \
+                        "Number of ROIs returned for raw traces is not the " \
+                        "same as number of ROIs returned for detrend traces. You " \
+                        "need to populate DetrendTraces() with the desired detrend " \
+                        "settings."\
 
-        fields = (Presentation() & key).fetch("field_id")
-        roi_ids_all = [[] for _ in fields]
-        responses_all = [[] for _ in fields]
-        num_rois_all = [[] for _ in fields]
-        restriction = [[] for _ in fields]
-        keys_field = [{} for _ in fields]
-        for i, f in enumerate(fields):
-            keys_field[i].update(key)
-            keys_field[i].update(dict(field_id=f))
-            if detrend_traces:
-                traces = \
-                    (DetrendTraces() * Presentation() &
-                     keys_field[i] & detrend_param_key).fetch("detrend_traces")
-                raw_traces = \
-                    (Traces() * Presentation() &
-                     keys_field[i]).fetch("traces")
-                assert len(traces) == len(raw_traces), \
-                    "Number of ROIs returned for raw traces is not the " \
-                    "same as number of ROIs returned for detrend traces. You " \
-                    "need to populate DetrendTraces() with the desired detrend " \
-                    "settings."\
+                else:
+                    traces = \
+                        (Traces() * Presentation() & field_key).fetch("traces")
+                tracestimes = \
+                    (Traces() * Presentation() & field_key).fetch("traces_times")
+                triggertimes = \
+                    (Presentation() & field_key).fetch1("triggertimes")
+                if (key["stim_id"] == 5) or (key["stim_id"] == 4):
+                    #if movie, upsample triggertimes to get 1 trigger per frame, (instead of just 1 trigger per sequence)
+                    upsampled_triggertimes = \
+                        [np.linspace(t, t + 4.9666667, 5 * 30)
+                         for t in triggertimes]
+                    upsampled_triggertimes = np.concatenate(upsampled_triggertimes)
+                elif key["stim_id"] == 0:
+                    up_factor = target_fs/stim_framerate # determine by how much the trigger should be upsampled
+                    ifi = 1/stim_framerate #interframe interval
+                    upsampled_triggertimes = \
+                        [np.linspace(t, t + ifi, up_factor, endpoint=False)
+                         for t in triggertimes]
+                    upsampled_triggertimes = np.concatenate(upsampled_triggertimes)
+                num_neurons = len(traces)
+                roi_ids = (Roi() & field_key).fetch("roi_id")
+                if quality_threshold_movie > 0:
+                    qual_idxs_movie = \
+                        (MovieQI() & field_key &
+                         detrend_param_key).fetch("movie_qi")
+                else:
+                    qual_idxs_movie = np.ones(num_neurons, dtype=bool)
+                temp_key = deepcopy(field_key)
+                temp_key.pop("stim_id")
+                if quality_threshold_chirp > 0:
+                    qual_idxs_chirp = (
+                            ChirpQI() & temp_key & 'detrend_param_set_id=1'
+                    ).fetch("chirp_qi")
+                else:
+                    qual_idxs_chirp = np.ones(num_neurons, dtype=bool)
+                if quality_threshold_ds > 0:
+                    qual_idxs_ds = (
+                            OsDsIndexes() & temp_key & 'detrend_param_set_id=1'
+                    ).fetch("d_qi")
+                else:
+                    qual_idxs_ds = np.ones(num_neurons, dtype=bool)
 
-            else:
-                traces = \
-                    (Traces() * Presentation() & keys_field[i]).fetch("traces")
-            tracestimes = \
-                (Traces() * Presentation() & keys_field[i]).fetch("traces_times")
-            triggertimes = \
-                (Presentation() & keys_field[i]).fetch1("triggertimes")
-            if (self.key["stim_id"] == 5) or (self.key["stim_id"] == 4):
-                #if movie, upsample triggertimes to get 1 trigger per frame, (instead of just 1 trigger per sequence)
-                upsampled_triggertimes = \
-                    [np.linspace(t, t + 4.9666667, 5 * 30)
-                     for t in triggertimes]
-                upsampled_triggertimes = np.concatenate(upsampled_triggertimes)
-            elif self.key["stim_id"] == 0:
-                up_factor = target_fs/stim_framerate # determine by how much the trigger should be upsampled
-                ifi = 1/stim_framerate #interframe interval
-                upsampled_triggertimes = \
-                    [np.linspace(t, t + ifi, up_factor, endpoint=False)
-                     for t in triggertimes]
-                upsampled_triggertimes = np.concatenate(upsampled_triggertimes)
-            num_neurons = len(traces)
-            roi_ids = (Roi() & keys_field[i]).fetch("roi_id")
-            if quality_threshold_movie > 0:
-                qual_idxs_movie = \
-                    (MovieQI() & keys_field[i] &
-                     detrend_param_key).fetch("movie_qi")
-            else:
-                qual_idxs_movie = np.ones(num_neurons, dtype=bool)
-            temp_key = deepcopy(keys_field[i])
-            temp_key.pop("stim_id")
-            if quality_threshold_chirp > 0:
-                qual_idxs_chirp = (
-                        ChirpQI() & temp_key & 'detrend_param_set_id=1'
-                ).fetch("chirp_qi")
-            else:
-                qual_idxs_chirp = np.ones(num_neurons, dtype=bool)
-            if quality_threshold_ds > 0:
-                qual_idxs_ds = (
-                        OsDsIndexes() & temp_key & 'detrend_param_set_id=1'
-                ).fetch("d_qi")
-            else:
-                qual_idxs_ds = np.ones(num_neurons, dtype=bool)
+                if quality_threshold_movie > 0:
+                    assert num_neurons == len(qual_idxs_movie), \
+                        "Number of neurons and movie quality indexes not the same"
+                if quality_threshold_chirp > 0:
+                    assert num_neurons == len(qual_idxs_chirp), \
+                        "Number of neurons and chirp quality indexes not the same"
+                if quality_threshold_ds > 0:
+                    assert num_neurons == len(qual_idxs_ds), \
+                        "Number of neurons and ds quality indexes not the same"
 
-            if quality_threshold_movie > 0:
-                assert num_neurons == len(qual_idxs_movie), \
-                    "Number of neurons and movie quality indexes not the same"
-            if quality_threshold_chirp > 0:
-                assert num_neurons == len(qual_idxs_chirp), \
-                    "Number of neurons and chirp quality indexes not the same"
-            if quality_threshold_ds > 0:
-                assert num_neurons == len(qual_idxs_ds), \
-                    "Number of neurons and ds quality indexes not the same"
+                quality_mask = np.logical_and(
+                   (qual_idxs_movie > quality_threshold_movie),
+                   np.logical_and((qual_idxs_chirp > quality_threshold_chirp),
+                                  (qual_idxs_ds > quality_threshold_ds)))
 
-            quality_mask = np.logical_and(
-               (qual_idxs_movie > quality_threshold_movie),
-               np.logical_and((qual_idxs_chirp > quality_threshold_chirp),
-                              (qual_idxs_ds > quality_threshold_ds)))
+                if (key["stim_id"] == 5) or (key["stim_id"]==4):
+                    responses = np.zeros((num_neurons, 150 * 123))
+                    for n in range(num_neurons):
+                        responses[n, :] = \
+                            self.interpolate_weights(tracestimes[n],
+                                                     traces[n],
+                                                     upsampled_triggertimes)
+                        responses[n, :] = responses[n, :] / np.std(responses[n, :])  # normalize response std
+                elif key["stim_id"] == 0:
+                    responses = np.zeros((num_neurons, stim.shape[0]))
+                    for n in range(num_neurons):
+                        responses[n, :] = \
+                            self.interpolate_weights(tracestimes[n],
+                                                     traces[n],
+                                                     upsampled_triggertimes)
+                        responses[n, :] = responses[n, :] / np.std(responses[n, :]) # normalize response std
 
-            if (self.key["stim_id"] == 5) or (self.key["stim_id"]==4):
-                responses = np.zeros((num_neurons, 150 * 123))
-                for n in range(num_neurons):
-                    responses[n, :] = \
-                        self.interpolate_weights(tracestimes[n],
-                                                 traces[n],
-                                                 upsampled_triggertimes)
-                    responses[n, :] = responses[n, :] / np.std(responses[n, :])  # normalize response std
-            elif self.key["stim_id"] == 0:
-                responses = np.zeros((num_neurons, stim.shape[0]))
-                for n in range(num_neurons):
-                    responses[n, :] = \
-                        self.interpolate_weights(tracestimes[n],
-                                                 traces[n],
-                                                 upsampled_triggertimes)
-                    responses[n, :] = responses[n, :] / np.std(responses[n, :]) # normalize response std
+                responses_all[i] = responses[quality_mask]
+                roi_ids_all[i] = roi_ids[quality_mask]
+                movie_qis_all[i] = qual_idxs_movie[quality_mask]
+                num_rois_all[i] = len(qual_idxs_movie[quality_mask])
+                depths[i] = np.zeros(num_rois_all[i])
+                movies = movie_train, movie_test, random_sequences
 
-            responses_all[i] = responses[quality_mask]
-            roi_ids_all[i] = roi_ids[quality_mask]
-            num_rois_all[i] = len(qual_idxs_movie[quality_mask])
-            depths = [np.zeros(num_rois_all[i]) for i in range(len(fields))]
-            movies = movie_train, movie_test, random_sequences
-
-        multi_dataset = MultiDataset(responses_all,
-                                     num_rois_all,
+            roi_ids_final[exp] = roi_ids_all
+            movie_qis_final[exp] = movie_qis_all
+            responses_final[exp] = responses_all
+            num_rois_final[exp] = num_rois_all
+            restriction_final[exp] = restriction
+            keys_field_final[exp] = keys_field
+            scan_sequence_final[exp] = scan_sequence_idxs
+            depths_final[exp] = depths
+            roi_masks_final[exp] = roi_masks
+        roi_ids_final = [el for sublist in roi_ids_final for el in sublist]
+        movie_qis_final = [el for sublist in movie_qis_final for el in sublist]
+        responses_final = [el for sublist in responses_final for el in sublist]
+        num_rois_final = [el for sublist in num_rois_final for el in sublist]
+        restriction_final = [el for sublist in restriction_final for el in sublist]
+        keys_field_final =[el for sublist in keys_field_final for el in sublist]
+        scan_sequence_final = [el for sublist in scan_sequence_final for el in sublist]
+        depths_final = [el for sublist in depths_final for el in sublist]
+        roi_masks_final = [el for sublist in roi_masks_final for el in sublist]
+        multi_dataset = MultiDataset(responses_final,
+                                     num_rois_final,
                                      n_scans,
-                                     scan_sequence_idxs,
-                                     keys_field,
-                                     restriction,
-                                     depths,
+                                     scan_sequence_final,
+                                     restriction_final,
+                                     restriction_final,
+                                     depths_final,
                                      movies=movies,
                                      luminance_paths_train=luminance_paths_train,
                                      luminance_paths_test=luminance_paths_test,
@@ -307,9 +382,9 @@ class MultiDatasetWrapper:
                                      downsample_size=downsample_size,
                                      adapt=adapt)
         self.multi_dataset = multi_dataset
-        self.roi_masks = roi_masks
-        self.roi_ids = roi_ids_all
-        self.movie_qis = qual_idxs_movie
+        self.roi_masks = roi_masks_final
+        self.roi_ids = roi_ids_final
+        self.movie_qis = movie_qis_final
 
 
 # %%
