@@ -7,6 +7,7 @@ from copy import deepcopy
 from scipy.interpolate import interp1d
 import datajoint as dj
 import warnings
+import c2s
 
 # Specify repository directory
 repo_directory = "/gpfs01/berens/user/cbehrens/RGC_DNN/datajoint_imaging_V2/"
@@ -78,6 +79,30 @@ class MultiDatasetWrapper:
 
         return data_interp
 
+    def spikefy(self,
+                num_neurons,
+                tracestimes,
+                traces,
+                triggertimes,
+                scan_frequency,
+                output_array):
+        c2s_input = []
+        for n in range(num_neurons):
+            c2s_input.append(dict(calcium=traces[n],
+                                  fps=scan_frequency))
+        c2s_input = c2s.preprocess(c2s_input)
+        c2s_output = c2s.predict(c2s_input)
+        #downsample output, put into array of correct shape
+        for n in range(num_neurons):
+            spiketimes = np.linspace(tracestimes[n][0],
+                                     tracestimes[n][-1],
+                                     c2s_output[n]['predictions'].shape[-1]
+                                     )
+            output_array[n, :] = self.interpolate_weights(
+                spiketimes, c2s_output[n]['predictions'], triggertimes
+            )
+        return output_array
+
     def generate_dataset(self,
                          detrend_traces=True,
                          detrend_param_set_id=1,
@@ -88,7 +113,8 @@ class MultiDatasetWrapper:
                          mouse_cam_filt_params=[],
                          color_channels=True,
                          adapt=0,
-                         target_fs=15
+                         target_fs=15,
+                         spikes=False,
                          ):
 
         if detrend_traces:
@@ -206,7 +232,7 @@ class MultiDatasetWrapper:
             repeated = np.repeat(reshaped, [up_factor]*stim.shape[0], axis=0)
             stim = repeated.reshape(repeated.shape[0], 15, 20)
             stim -= np.mean(stim) # set stimululs mean to zero
-            #split into 10 % test, 80 % train, 10 % test
+            #split into 20 % test, 80 % train
             movie_train = stim[300*up_factor:, :, :]
             movie_test = stim[:300*up_factor, :, :]
             #insert channel dimension
@@ -224,7 +250,7 @@ class MultiDatasetWrapper:
         depths_final = [[] for _ in range(self.n_exps)]
         roi_masks_final = [[] for _ in range(self.n_exps)]
         n_scans = 0
-        for exp, keys in enumerate(self.key):
+        for exp, keys in enumerate(self.key): #go through different experiments
             n_fields = len(keys)
             roi_ids_all = [[] for _ in range(n_fields)]
             movie_qis_all = [[] for _ in range(n_fields)]
@@ -235,10 +261,11 @@ class MultiDatasetWrapper:
             roi_masks = [[] for _ in range(n_fields)]
             depths = [[] for _ in range(n_fields)]
             scan_sequence_idxs = np.zeros(n_fields, dtype=int)
-            for i, field_key in enumerate(keys):
+            for i, field_key in enumerate(keys): # go through different fields per experiment
                 restriction[i] = field_key
                 roi_masks[i] = (Field().RoiMask() & field_key).fetch1("roi_mask")
                 header_path = (Presentation() & field_key).fetch1('h5_header')
+                scan_frequency = (Presentation() & field_key).fetch1('scan_frequency')
                 n_scans += 1
                 if field_key["stim_id"] == 5:
                     filename = header_path.split('/')[-1]
@@ -288,6 +315,7 @@ class MultiDatasetWrapper:
                     upsampled_triggertimes = np.concatenate(upsampled_triggertimes)
                 num_neurons = len(traces)
                 roi_ids = (Roi() & field_key).fetch("roi_id")
+                #perform all quality checks -> fetch quality indexes from DJ
                 if quality_threshold_movie > 0:
                     qual_idxs_movie = \
                         (MovieQI() & field_key &
@@ -318,7 +346,7 @@ class MultiDatasetWrapper:
                 if quality_threshold_ds > 0:
                     assert num_neurons == len(qual_idxs_ds), \
                         "Number of neurons and ds quality indexes not the same"
-
+                #create Boolean mask which is True for cells that pass quality checks, False otherwise
                 quality_mask = np.logical_and(
                    (qual_idxs_movie > quality_threshold_movie),
                    np.logical_and((qual_idxs_chirp > quality_threshold_chirp),
@@ -326,20 +354,21 @@ class MultiDatasetWrapper:
 
                 if (key["stim_id"] == 5) or (key["stim_id"]==4):
                     responses = np.zeros((num_neurons, 150 * 123))
-                    for n in range(num_neurons):
-                        responses[n, :] = \
-                            self.interpolate_weights(tracestimes[n],
-                                                     traces[n],
-                                                     upsampled_triggertimes)
-                        responses[n, :] = responses[n, :] / np.std(responses[n, :])  # normalize response std
                 elif key["stim_id"] == 0:
                     responses = np.zeros((num_neurons, stim.shape[0]))
+                #do c2s here
+                if spikes:
+                    #put responses in right format
+                    responses = self.spikefy(num_neurons, tracestimes, traces,
+                                             upsampled_triggertimes,
+                                             scan_frequency,
+                                             responses)
+                else:
                     for n in range(num_neurons):
                         responses[n, :] = \
                             self.interpolate_weights(tracestimes[n],
                                                      traces[n],
                                                      upsampled_triggertimes)
-                        responses[n, :] = responses[n, :] / np.std(responses[n, :]) # normalize response std
 
                 responses_all[i] = responses[quality_mask]
                 roi_ids_all[i] = roi_ids[quality_mask]
