@@ -316,12 +316,15 @@ class MultiDatasetWrapper:
                 num_neurons = len(traces)
                 roi_ids = (Roi() & field_key).fetch("roi_id")
                 #perform all quality checks -> fetch quality indexes from DJ
-                if quality_threshold_movie > 0:
-                    qual_idxs_movie = \
-                        (MovieQI() & field_key &
-                         detrend_param_key).fetch("movie_qi")
-                else:
-                    qual_idxs_movie = np.ones(num_neurons, dtype=bool)
+                qual_idxs_movie = \
+                    (MovieQI() & field_key &
+                     detrend_param_key).fetch("movie_qi")
+                # if quality_threshold_movie > 0:
+                #     qual_idxs_movie = \
+                #         (MovieQI() & field_key &
+                #          detrend_param_key).fetch("movie_qi")
+                # else:
+                #     qual_idxs_movie = np.ones(num_neurons, dtype=bool)
                 temp_key = deepcopy(field_key)
                 temp_key.pop("stim_id")
                 if quality_threshold_chirp > 0:
@@ -347,6 +350,7 @@ class MultiDatasetWrapper:
                     assert num_neurons == len(qual_idxs_ds), \
                         "Number of neurons and ds quality indexes not the same"
                 #create Boolean mask which is True for cells that pass quality checks, False otherwise
+
                 quality_mask = np.logical_and(
                    (qual_idxs_movie > quality_threshold_movie),
                    np.logical_and((qual_idxs_chirp > quality_threshold_chirp),

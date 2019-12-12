@@ -145,6 +145,13 @@ class Dataset:
         if noise:
             self.responses_test = responses[:,:10*self.clip_length].T
             self.responses_train = responses[:,10*self.clip_length:].T
+            #standardize responses separately for training and test set
+            test_std = self.responses_test.std(axis=0)
+            test_std = np.tile(test_std, [self.responses_test.shape[0], 1])
+            self.responses_test = np.divide(self.responses_test, test_std)
+            train_std = self.responses_train.std(axis=0)
+            train_std = np.tile(train_std, [self.responses_train.shape[0], 1])
+            self.responses_train = np.divide(self.responses_train, train_std)
         else:
             self.responses_test = np.zeros((5*self.clip_length,self.num_neurons))#DN
             self.responses_train = np.zeros((self.num_clips*self.clip_length,self.num_neurons))#DN
@@ -155,8 +162,10 @@ class Dataset:
                                  responses[roi,118*self.clip_length:]))
                 self.test_responses_by_trial.append(tmp)#calculated below after z-scoring
                 self.responses_test[:,roi] = np.mean(tmp,0)
+                self.responses_test[:, roi] = self.responses_test[:, roi]/self.responses_test[:, roi].std()
                 self.responses_train[:,roi] = np.concatenate((responses[roi,5*self.clip_length:59*self.clip_length],
                                                               responses[roi,64*self.clip_length:118*self.clip_length]))
+                self.responses_train[:, roi] = self.responses_train[:, roi]/self.responses_train[:, roi].std()
             self.test_responses_by_trial = np.asarray(self.test_responses_by_trial)
             # measure oracle (test set correlation each with remaining n-1, averaged)
             self.test_responses_for_oracle = np.zeros_like(self.test_responses_by_trial)
@@ -343,10 +352,10 @@ class Dataset:
         return np.stack(movies, axis=0), np.stack(responses, axis=0)#BDHWC and BDN
 
     def next_epoch(self, chunk_size=50):
-        shift = np.random.randint(0, np.min([chunk_size, self.clip_length - self.adapt - chunk_size]))
+        shift = np.random.randint(0, np.min([chunk_size, self.clip_length - self.adapt - chunk_size])) # generate random shift to start a chunk
         chunk_start_idx = []
-        for start, length in zip(self.seq_start_idx, self.seq_length):
-            idx = np.arange(start + shift, start + shift + length - chunk_size + 1, chunk_size)
+        for start, length in zip(self.seq_start_idx, self.seq_length): #seq_start_idx are starting indexes of sequences of training data uninterrupted by validation sets; they are of different lengths
+            idx = np.arange(start + shift, start + shift + length - chunk_size + 1, chunk_size) #generate indexes within theses sequences which are chunk_size apart
             chunk_start_idx += list(idx[:-1])
         self.chunk_start_idx = np.random.permutation(chunk_start_idx)
         # self.num_chunks = len(chunk_start_idx)
