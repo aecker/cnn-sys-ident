@@ -14,6 +14,9 @@ import tensorflow as tf
 from scipy import stats
 from scipy.signal import butter, filtfilt
 
+config = tf.ConfigProto()
+config.gpu_options.allow_growth = True
+
 STIMULUS_PATH = '/gpfs01/euler/data/Resources/Stimulus/natural_movies/'
 
 NUM_CLIPS = 108
@@ -79,14 +82,11 @@ def load_stimuli(train_movie_file,
         movie_test = downsample(movie_test, downsample_size)
 
     # preprocess images (mean=0, SD=1)
-    m = movie_train.mean().reshape((-1,1))
-    sd = movie_train.std().reshape((-1,1))
-    zscore = lambda img: (img - m) / sd
-    movie_train = zscore(movie_train)
-    m = movie_test.mean().reshape((-1, 1))
-    sd = movie_test.std().reshape((-1, 1))
-    zscore = lambda img: (img - m) / sd
-    movie_test = zscore(movie_test)
+    # joint zscoring for training and test movie
+    m = np.mean(np.concatenate((movie_train,movie_test)))
+    sd = np.std(np.concatenate((movie_train,movie_test)))
+    movie_train = (movie_train - m) / sd
+    movie_test = (movie_test - m) / sd
 
     # load ordering of random sequences
     random_sequences = np.load(os.path.join(STIMULUS_PATH, random_sequences_file))
@@ -98,7 +98,7 @@ def downsample(images, out_size, verbose = False):
     if verbose:
         print("resizing images from {} to {} (square)".format(images.shape[1], out_size))
     with tf.Graph().as_default():
-        with tf.Session() as sess:
+        with tf.Session(config=config) as sess:
             return sess.run(tf.image.resize_images(images, (out_size, out_size)))
 
 class Dataset:
@@ -145,13 +145,6 @@ class Dataset:
         if noise:
             self.responses_test = responses[:,:10*self.clip_length].T
             self.responses_train = responses[:,10*self.clip_length:].T
-            #standardize responses separately for training and test set
-            test_std = self.responses_test.std(axis=0)
-            test_std = np.tile(test_std, [self.responses_test.shape[0], 1])
-            self.responses_test = np.divide(self.responses_test, test_std)
-            train_std = self.responses_train.std(axis=0)
-            train_std = np.tile(train_std, [self.responses_train.shape[0], 1])
-            self.responses_train = np.divide(self.responses_train, train_std)
         else:
             self.responses_test = np.zeros((5*self.clip_length,self.num_neurons))#DN
             self.responses_train = np.zeros((self.num_clips*self.clip_length,self.num_neurons))#DN
@@ -162,10 +155,8 @@ class Dataset:
                                  responses[roi,118*self.clip_length:]))
                 self.test_responses_by_trial.append(tmp)#calculated below after z-scoring
                 self.responses_test[:,roi] = np.mean(tmp,0)
-                self.responses_test[:, roi] = self.responses_test[:, roi]/self.responses_test[:, roi].std()
                 self.responses_train[:,roi] = np.concatenate((responses[roi,5*self.clip_length:59*self.clip_length],
                                                               responses[roi,64*self.clip_length:118*self.clip_length]))
-                self.responses_train[:, roi] = self.responses_train[:, roi]/self.responses_train[:, roi].std()
             self.test_responses_by_trial = np.asarray(self.test_responses_by_trial)
             # measure oracle (test set correlation each with remaining n-1, averaged)
             self.test_responses_for_oracle = np.zeros_like(self.test_responses_by_trial)

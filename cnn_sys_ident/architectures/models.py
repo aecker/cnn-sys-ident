@@ -4,6 +4,9 @@ import os
 import inspect
 import random
 
+config = tf.ConfigProto()
+config.gpu_options.allow_growth = True
+
 class TFSession:
     _saver = None
     
@@ -25,7 +28,7 @@ class TFSession:
         with self.graph.as_default():
             tf.set_random_seed(self.seed)
             np.random.seed(self.seed)
-        self.session = tf.Session(graph=self.graph)
+        self.session = tf.Session(graph=self.graph,config=config)
 
     def __del__(self):
         try:

@@ -374,6 +374,8 @@ class MultiDatasetWrapper:
                                                      traces[n],
                                                      upsampled_triggertimes)
 
+				responses = responses \ np.std(responses, axis=1, keepdims=True)  # normalize response std
+
                 responses_all[i] = responses[quality_mask]
                 roi_ids_all[i] = roi_ids[quality_mask]
                 movie_qis_all[i] = qual_idxs_movie[quality_mask]
