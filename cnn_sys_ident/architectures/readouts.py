@@ -332,6 +332,8 @@ class SpatialXFeature3dJointL1Readout:
                  scope='readout',
                  reuse=False,
                  nonlinearity=True,
+                 ca_kernel=False,
+                 output_sparsity=0,
                  **kwargs):
         with base.tf_session.graph.as_default():
             with tf.variable_scope(scope, reuse=reuse):
@@ -376,14 +378,17 @@ class SpatialXFeature3dJointL1Readout:
 
                 # L1 regularization for readout layer
                 # summed, scales with neurons <<<< YOU WANT THIS!!!
-                self.readout_reg = readout_sparsity * tf.reduce_sum(
+                self.reg_loss = readout_sparsity * tf.reduce_sum(
                     tf.reduce_sum(tf.abs(self.masks), [1, 2]) * \
                     tf.reduce_sum(tf.abs(self.feature_weights), 1))
 
 #                 self.mask_reg = mask_sparsity * tf.reduce_sum(tf.abs(self.masks))
 #                 self.feature_reg = feature_sparsity * tf.reduce_sum(tf.abs(self.feature_weights))
 #                 self.readout_reg = self.mask_reg + self.feature_reg
-                tf.losses.add_loss(self.readout_reg, tf.GraphKeys.REGULARIZATION_LOSSES)
+                tf.losses.add_loss(self.reg_loss, tf.GraphKeys.REGULARIZATION_LOSSES)
+    
+                self.sparsity_loss = output_sparsity * tf.reduce_sum(tf.abs(self.h))
+                tf.losses.add_loss(self.sparsity_loss, tf.GraphKeys.REGULARIZATION_LOSSES)
 
                 # bias and output nonlinearity
                 _, responses = data.train()
@@ -397,10 +402,136 @@ class SpatialXFeature3dJointL1Readout:
                     shape=[num_neurons],
                     initializer=tf.constant_initializer(bias_init))
                 if nonlinearity:
-                    self.output = tf.identity(soft_threshold(self.h + self.biases), name='output')
+                    self.y = tf.identity(soft_threshold(self.h + self.biases), name='pre_output')
                 else:
-                    self.output = tf.identity(self.h + self.biases, name='output')
+                    self.y = tf.identity(self.h + self.biases, name='pre_output')
+                    
+                                # optional calcium kernel
+                if ca_kernel:
+                    ca_kernel_size = 15
+                    ca_timebase = tf.constant(np.linspace(0, 1, ca_kernel_size), dtype=tf.float32)
+                    ca_kernel_tau = tf.get_variable('ca_kernel_tau',shape=2,initializer=tf.random_uniform_initializer(-20,-5))
+                    ca_kernel_weight = tf.get_variable('ca_kernel_weights',shape=2,initializer=tf.constant_initializer(0.5))
+                    # initialization with fixed kernel
+#                     ca_kernel_tau = tf.constant([-3,-10],dtype='float32')
+#                     ca_kernel_weight= tf.constant([0.5,0.5])
+                    calcium_kernel = ca_kernel_weight[0]*tf.exp(tf.scalar_mul(ca_kernel_tau[0],ca_timebase)) \
+                                    + ca_kernel_weight[1]*tf.exp(tf.scalar_mul(ca_kernel_tau[1],ca_timebase))
+                    calcium_kernel = tf.reverse(calcium_kernel, axis=[0])
+                    calcium_kernel = tf.expand_dims(calcium_kernel, axis = [-1])
+                    calcium_kernel = tf.expand_dims(calcium_kernel, axis = [-1])
+                    self.calcium_kernel = tf.expand_dims(calcium_kernel, axis = [-1])
+
+                    # pad the input
+                    paddings = tf.constant([[0, 0],
+                                            [ca_kernel_size-1, 0],
+                                            [0, 0]])
+                    y = tf.pad(self.y, paddings, "CONSTANT")
+                    self.ca_kernel_input = tf.expand_dims(y, axis = [-1])
+                    ca_kernel_output = tf.nn.convolution(self.ca_kernel_input,
+                                                         self.calcium_kernel,
+                                                         name='output',
+                                                         padding='VALID'
+                                                         )
+                    self.output = tf.squeeze(ca_kernel_output, -1, name='ca_output')
+                else:
+                    self.output = tf.identity(self.y, name='output')
+                    
+                    
+class SpatialXFeature3dJointTemperatureReadout:
+    def __init__(self,
+                 base,
+                 data,
+                 inputs,
+                 positive_feature_weights=False,
+#                  mask_sparsity=0.01,
+#                  feature_sparsity=0.001,
+#                  readout_sparsity=0.01,
+                 init_masks='sta',
+                 scope='readout',
+                 reuse=False,
+                 nonlinearity=True,
+                 ca_kernel=False,
+                 output_sparsity=0,
+                 **kwargs):
+        with base.tf_session.graph.as_default():
+            with tf.variable_scope(scope, reuse=reuse):
+                # data = base.data
+                _, _, num_px_y, num_px_x, num_features = inputs.shape.as_list()
+                num_neurons = data.num_neurons
                 
+                # masks
+                if init_masks == 'sta':
+                    try:
+                        data.sta_space
+                    except AttributeError:
+                        if scope=='readout0':
+                            print('Initialize masks randomly')
+                        mask_init = tf.truncated_normal_initializer(mean=0.0, stddev=0.01)
+                    else: # to verify/test
+                        tmp_indx = (data.px_x-num_px_x)//2
+                        tmp_indy = (data.px_y-num_px_y)//2
+                        tmp_sta = data.sta_space[:,tmp_indy:tmp_indy+num_px_y,tmp_indx:tmp_indx+num_px_x]
+                        mask_init = np.random.normal(0,.01,tmp_sta.shape)
+                        for n in range(num_neurons):
+                            max_ind = np.unravel_index(np.argmax(abs(tmp_sta[n])),[num_px_y, num_px_x])
+                            mask_init[n,max_ind[0],max_ind[1]] = .2
+                        mask_init = tf.constant_initializer(mask_init)
+                else:
+                    mask_init = tf.truncated_normal_initializer(mean=0.0, stddev=0.01)
+                self.masks = tf.get_variable(
+                    'masks',
+                    shape=[num_neurons, num_px_y * num_px_x],
+                    initializer=mask_init)
+                self.beta = tf.placeholder_with_default(tf.constant(1, dtype=tf.float32), [])
+                self.masks = tf.nn.softmax(self.masks*self.beta,axis=-1) # i temperature = runs, do the same for the weights?
+#                 self.masks = tf.abs(self.masks, name='positive_masks')
+                self.masked = tf.tensordot(inputs, tf.reshape(self.masks,[num_neurons, num_px_y, num_px_x]), [[2, 3], [1, 2]], name='masked')
+
+                # feature weights
+                self.feature_weights = tf.get_variable(
+                    'feature_weights',
+                    shape=[num_neurons, num_features],
+                    initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.01))
+                self.feature_weights = tf.nn.softmax(self.feature_weights*self.beta*5,axis=-1)
+#                 if positive_feature_weights:
+#                     self.feature_weights = tf.abs(self.feature_weights, name='positive_feature_weights')
+                self.h = tf.reduce_sum(self.masked * tf.transpose(self.feature_weights), 2)  # 2?
+
+                # L1 regularization for readout layer
+                # summed, scales with neurons <<<< YOU WANT THIS!!!
+#                 self.reg_loss = readout_sparsity * tf.reduce_sum(
+#                     tf.reduce_sum(tf.abs(self.masks), [1, 2]) * \
+#                     tf.reduce_sum(tf.abs(self.feature_weights), 1))
+
+#                 self.mask_reg = mask_sparsity * tf.reduce_sum(tf.abs(self.masks))
+#                 self.feature_reg = feature_sparsity * tf.reduce_sum(tf.abs(self.feature_weights))
+#                 self.readout_reg = self.mask_reg + self.feature_reg
+#                 tf.losses.add_loss(self.reg_loss, tf.GraphKeys.REGULARIZATION_LOSSES)
+    
+#                 self.sparsity_loss = output_sparsity * tf.reduce_sum(tf.abs(self.h))
+#                 tf.losses.add_loss(self.sparsity_loss, tf.GraphKeys.REGULARIZATION_LOSSES)
+
+                # bias and output nonlinearity
+                _, responses = data.train()
+                if nonlinearity:
+#                     bias_init = 0.5 * inv_soft_threshold(responses.mean(axis=0))
+                    bias_init = inv_soft_threshold(responses.mean(axis=0))
+                else:
+                    bias_init = responses.mean(axis=0)
+                self.biases = tf.get_variable(
+                    'biases',
+                    shape=[num_neurons],
+                    initializer=tf.constant_initializer(bias_init))
+                self.scales = tf.get_variable(
+                    'scales',
+                    shape=[num_neurons],
+                    initializer=tf.ones_initializer())
+                if nonlinearity:
+                    self.output = tf.identity(soft_threshold(self.h * self.scales + self.biases), name='output')
+                else:
+                    self.output = tf.identity(self.h * self.scales + self.biases, name='pre_output')
+
 
 class ConstantReadout:
     def __init__(self,
@@ -420,7 +551,8 @@ class ConstantReadout:
                     responses.mean(axis=0),
                     dtype=tf.float32,
                     name='output',
-                    shape=[1, 1, num_neurons]) + inputs[:,:-20,0:1,0,0] * 0
+                    shape=[1, 1, num_neurons]) + inputs[:,:,0:1,0,0] * 0
+#                     shape=[1, 1, num_neurons]) + inputs[:,:-20,0:1,0,0] * 0
                 print(self.output.shape)
 
 

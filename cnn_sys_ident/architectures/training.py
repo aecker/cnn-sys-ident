@@ -34,6 +34,8 @@ class Trainer:
             val_steps=100,
             patience=5,
             lr_decay_steps=2,
+            temperature=False,
+            temp_scale=1,
             callback=None):
         with self.graph.as_default():
             update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
@@ -54,6 +56,10 @@ class Trainer:
 #                     print('iteration:',iter_num)
                     self.session.run([self.train_step, update_ops], feed_dict)
                     iter_num += 1
+                    #testing temperature scaling
+                    if temperature:
+                        for scan in range(self.data.num_scans):
+                            self.model.readout.readouts[scan].beta += temp_scale
 
                     # validate/save periodically
                     if not (iter_num % val_steps):
