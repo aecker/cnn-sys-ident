@@ -17,7 +17,7 @@ sys.path.insert(0, repo_directory)
 dj.config.load(repo_directory + "conf/dj_conf_cbehrens.json")
 from schema.imaging_schema import *
 from schema.stimulus_schema import MovieQI, DetrendTraces, ChirpQI, OsDsIndexes,\
-    DetrendParams, MouseCamMovieFiltParams, MouseCamMovieFiltering, Stimulus
+    DetrendParams, MouseCamMovieFiltParams, MouseCamMovieFiltering, Stimulus, Calcium2Spikes
 from cnn_sys_ident.retina.data import *
 from schema.stimulus_schema import MovieQI
 
@@ -26,6 +26,10 @@ from schema.stimulus_schema import MovieQI
 class MultiDatasetWrapper:
     def __init__(self, experimenter, date, exp_num, stim_path, stim_id,
                  field_id=[]):
+        """
+        generates a list of lists of keys, the outer lists for experiments, the inner list for fields within experiments
+        """
+        
         self.stim_path = stim_path
         if type(experimenter) == list:
             #several experiments
@@ -49,6 +53,9 @@ class MultiDatasetWrapper:
             self.n_exps = 1
 
     def gen_key(self, experimenter, date, exp_num, stim_id, field_id):
+        """
+        generates a list of keys, 1 key per field
+        """
         key = []
         if len(field_id) > 0: # if the fields are specified, add only those
             for fid in field_id:
@@ -78,30 +85,6 @@ class MultiDatasetWrapper:
         )(new_times)
 
         return data_interp
-
-    def spikefy(self,
-                num_neurons,
-                tracestimes,
-                traces,
-                triggertimes,
-                scan_frequency,
-                output_array):
-        c2s_input = []
-        for n in range(num_neurons):
-            c2s_input.append(dict(calcium=traces[n],
-                                  fps=scan_frequency))
-        c2s_input = c2s.preprocess(c2s_input)
-        c2s_output = c2s.predict(c2s_input)
-        #downsample output, put into array of correct shape
-        for n in range(num_neurons):
-            spiketimes = np.linspace(tracestimes[n][0],
-                                     tracestimes[n][-1],
-                                     c2s_output[n]['predictions'].shape[-1]
-                                     )
-            output_array[n, :] = self.interpolate_weights(
-                spiketimes, c2s_output[n]['predictions'], triggertimes
-            )
-        return output_array
 
     def generate_dataset(self,
                          detrend_traces=True,
@@ -280,7 +263,7 @@ class MultiDatasetWrapper:
                     except:
                         scan_sequence_idxs[i] = \
                             int(re.search("NM(.+?).h5", filename).group(1))
-                if detrend_traces:
+                if detrend_traces and not(spikes):
                     traces = \
                         (DetrendTraces() * Presentation() &
                          field_key & detrend_param_key).fetch("detrend_traces")
@@ -293,9 +276,13 @@ class MultiDatasetWrapper:
                         "need to populate DetrendTraces() with the desired detrend " \
                         "settings."\
 
-                else:
+                elif (not(detrend_traces) and not(spikes)):
                     traces = \
                         (Traces() * Presentation() & field_key).fetch("traces")
+                else: 
+                    traces = (
+                            Calcium2Spikes() * Presentation() & field_key
+                    ).fetch("spikes")
                 tracestimes = \
                     (Traces() * Presentation() & field_key).fetch("traces_times")
                 triggertimes = \
@@ -329,13 +316,13 @@ class MultiDatasetWrapper:
                 temp_key.pop("stim_id")
                 if quality_threshold_chirp > 0:
                     qual_idxs_chirp = (
-                            ChirpQI() & temp_key & 'detrend_param_set_id=1'
+                            ChirpQI() & temp_key & detrend_param_key
                     ).fetch("chirp_qi")
                 else:
                     qual_idxs_chirp = np.ones(num_neurons, dtype=bool)
                 if quality_threshold_ds > 0:
                     qual_idxs_ds = (
-                            OsDsIndexes() & temp_key & 'detrend_param_set_id=1'
+                            OsDsIndexes() & temp_key & detrend_param_key
                     ).fetch("d_qi")
                 else:
                     qual_idxs_ds = np.ones(num_neurons, dtype=bool)
@@ -361,18 +348,12 @@ class MultiDatasetWrapper:
                 elif key["stim_id"] == 0:
                     responses = np.zeros((num_neurons, stim.shape[0]))
                 #do c2s here
-                if spikes:
-                    #put responses in right format
-                    responses = self.spikefy(num_neurons, tracestimes, traces,
-                                             upsampled_triggertimes,
-                                             scan_frequency,
-                                             responses)
-                else:
-                    for n in range(num_neurons):
-                        responses[n, :] = \
-                            self.interpolate_weights(tracestimes[n],
-                                                     traces[n],
-                                                     upsampled_triggertimes)
+
+                for n in range(num_neurons):
+                    responses[n, :] = \
+                        self.interpolate_weights(tracestimes[n],
+                                                 traces[n],
+                                                 upsampled_triggertimes)
 
                 responses = responses / np.std(responses, axis=1, keepdims=True)  # normalize response std
 
