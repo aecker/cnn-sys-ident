@@ -436,30 +436,29 @@ class SpatialXFeature3dJointL1Readout:
                     self.output = tf.squeeze(ca_kernel_output, -1, name='ca_output')
                 else:
                     self.output = tf.identity(self.y, name='output')
-                    
-                    
+
+
 class SpatialXFeature3dJointTemperatureReadout:
     def __init__(self,
                  base,
                  data,
                  inputs,
                  positive_feature_weights=False,
-#                  mask_sparsity=0.01,
-#                  feature_sparsity=0.001,
-#                  readout_sparsity=0.01,
                  init_masks='sta',
                  scope='readout',
                  reuse=False,
                  nonlinearity=True,
                  ca_kernel=False,
                  output_sparsity=0,
+                 temp_mask_scale=1,
+                 temp_feature_scale=1,
                  **kwargs):
         with base.tf_session.graph.as_default():
             with tf.variable_scope(scope, reuse=reuse):
                 # data = base.data
                 _, _, num_px_y, num_px_x, num_features = inputs.shape.as_list()
                 num_neurons = data.num_neurons
-                
+
                 # masks
                 if init_masks == 'sta':
                     try:
@@ -484,7 +483,7 @@ class SpatialXFeature3dJointTemperatureReadout:
                     shape=[num_neurons, num_px_y * num_px_x],
                     initializer=mask_init)
                 self.beta = tf.placeholder_with_default(tf.constant(1, dtype=tf.float32), [])
-                self.masks = tf.nn.softmax(self.masks*self.beta,axis=-1) # i temperature = runs, do the same for the weights?
+                self.masks = tf.nn.softmax(self.masks*self.beta*temp_mask_scale,axis=-1)
 #                 self.masks = tf.abs(self.masks, name='positive_masks')
                 self.masked = tf.tensordot(inputs, tf.reshape(self.masks,[num_neurons, num_px_y, num_px_x]), [[2, 3], [1, 2]], name='masked')
 
@@ -493,29 +492,64 @@ class SpatialXFeature3dJointTemperatureReadout:
                     'feature_weights',
                     shape=[num_neurons, num_features],
                     initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.01))
-                self.feature_weights = tf.nn.softmax(self.feature_weights*self.beta*5,axis=-1)
+                self.feature_weights = tf.nn.softmax(self.feature_weights*self.beta*temp_feature_scale,axis=-1)
 #                 if positive_feature_weights:
 #                     self.feature_weights = tf.abs(self.feature_weights, name='positive_feature_weights')
                 self.h = tf.reduce_sum(self.masked * tf.transpose(self.feature_weights), 2)  # 2?
-
-                # L1 regularization for readout layer
-                # summed, scales with neurons <<<< YOU WANT THIS!!!
-#                 self.reg_loss = readout_sparsity * tf.reduce_sum(
-#                     tf.reduce_sum(tf.abs(self.masks), [1, 2]) * \
-#                     tf.reduce_sum(tf.abs(self.feature_weights), 1))
-
-#                 self.mask_reg = mask_sparsity * tf.reduce_sum(tf.abs(self.masks))
-#                 self.feature_reg = feature_sparsity * tf.reduce_sum(tf.abs(self.feature_weights))
-#                 self.readout_reg = self.mask_reg + self.feature_reg
-#                 tf.losses.add_loss(self.reg_loss, tf.GraphKeys.REGULARIZATION_LOSSES)
-    
-#                 self.sparsity_loss = output_sparsity * tf.reduce_sum(tf.abs(self.h))
-#                 tf.losses.add_loss(self.sparsity_loss, tf.GraphKeys.REGULARIZATION_LOSSES)
 
                 # bias and output nonlinearity
                 _, responses = data.train()
                 if nonlinearity:
 #                     bias_init = 0.5 * inv_soft_threshold(responses.mean(axis=0))
+                    bias_init = inv_soft_threshold(responses.mean(axis=0))
+                else:
+                    bias_init = responses.mean(axis=0)
+                self.biases = tf.get_variable(
+                    'biases',
+                    shape=[num_neurons],
+                    initializer=tf.constant_initializer(bias_init))
+                self.scales = tf.get_variable(
+                    'scales',
+                    shape=[num_neurons],
+                    initializer=tf.ones_initializer())
+                if nonlinearity:
+                    self.output = tf.identity(soft_threshold(self.h * self.scales + self.biases), name='output')
+                else:
+                    self.output = tf.identity(self.h * self.scales + self.biases, name='pre_output')
+
+
+class LuminanceFeatureTemperatureReadout:
+    def __init__(self,
+                 base,
+                 data,
+                 inputs,
+                 positive_feature_weights=False,
+                 init_masks='sta',
+                 scope='readout',
+                 reuse=False,
+                 nonlinearity=True,
+                 ca_kernel=False,
+                 output_sparsity=0,
+                 temp_feature_scale=1,
+                 **kwargs):
+        with base.tf_session.graph.as_default():
+            with tf.variable_scope(scope, reuse=reuse):
+                _, _, num_features = inputs.shape.as_list()
+                num_neurons = data.num_neurons
+
+                self.beta = tf.placeholder_with_default(tf.constant(1, dtype=tf.float32), [])
+
+                # feature weights
+                self.feature_weights = tf.get_variable(
+                    'feature_weights',
+                    shape=[num_neurons, num_features],
+                    initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.01))
+                self.feature_weights = tf.nn.softmax(self.feature_weights*self.beta*temp_feature_scale,axis=-1)
+                self.h = tf.tensordot(inputs, self.feature_weights, [-1,-1])
+
+                # bias and output nonlinearity
+                _, responses = data.train()
+                if nonlinearity:
                     bias_init = inv_soft_threshold(responses.mean(axis=0))
                 else:
                     bias_init = responses.mean(axis=0)

@@ -659,6 +659,111 @@ class StackedFactorizedConv3dCore2:
                 self.output = tf.identity(self.conv[-1], name='output')
 
 
+class StackedLuminanceConv1dCore2:
+    def __init__(self,
+                 base,
+                 data,
+                 inputs,
+                 filter_size_temporal=[20, 20],
+                 num_filters=[8, 16],
+                 stride=[1, 1],
+                 rate=[1, 1],
+                 padding=['VALID', 'VALID'],
+                 nonzero_padding=False,
+                 padding_constant=0,
+                 activation_fn=['elu', 'none'],
+                 rel_smooth_weight=[1, 0],
+                 rel_sparse_weight=[0, 1],
+                 conv_smooth_weight_temporal=0.001,
+                 conv_sparse_weight=0.001,
+                 scale=False,
+                 scope='core',
+                 reuse=False,
+                 **kwargs):
+        #calculate resulting steps in history that contribute to output
+        self.steps_hist = 1+np.sum(filter_size_temporal)-len(filter_size_temporal)
+        with base.tf_session.graph.as_default():
+            with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
+                self.conv = []
+                self.weights_temporal = []
+                self.weights_scan_bias = []
+                self.weights_scan_scale = []
+                # Put scans into batch dimension: SBDHWC -> (S*B)DHWC
+                # input_list = [i[0] for i in tf.split(inputs, data.input_shape[0])]
+                # x = tf.concat(input_list, 0, name = 'put_scan_in_batch')
+                x = tf.reduce_mean(inputs,axis=[2,3])
+                for i, (fs_t, nf, st, rt, pd, fn, sm, sp) in enumerate(
+                        zip(filter_size_temporal, num_filters,
+                            stride, rate, padding, activation_fn, rel_smooth_weight,
+                            rel_sparse_weight)):
+                    with tf.variable_scope('conv{}'.format(i), reuse=tf.AUTO_REUSE):
+                        # temporal
+                        # hack
+#                         print('TEMPORAL WEIGHTS INITIALIZATION FIXED TO FILTERS FROM BASELINE MODEL!')
+#                         tp_weight_init = np.load('../../../RF_init_test/baseline_tp_w.npy')
+#                         tp_weight_init = tp_weight_init.reshape(tp_weight_init.shape[0],1,1,1,tp_weight_init.shape[1])
+                        # filter: [filter_depth, filter_height, filter_width, in_channels, out_channels]
+#                         print('CHANGED INIT MEAN OF TEMPORAL WEIGHTS!')
+                        self.weights_temporal.append(tf.get_variable(
+                                           name='weights_temporal_{}'.format(i),
+                                           shape=[fs_t,x.shape[-1],int(nf)],
+#                                            initializer=tf.constant_initializer(tp_weight_init)))
+#                                            initializer=tf.truncated_normal_initializer(mean=0.01, stddev=0.01)))
+                                           initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.01)))
+
+                        # combined
+                        self.W_combined = self.weights_temporal[-1]
+
+                        # Convolution
+                        x = tf.nn.conv1d(
+                            value=x,
+                            filters=self.W_combined,
+                            stride=1,
+                            padding=pd
+                        )
+                        x = tf.contrib.layers.batch_norm(
+                                inputs=x,
+                                decay=0.9,
+                                scale=False,
+                                center=False,
+                                is_training=base.is_training,
+                            )
+
+                        self.weights_scan_bias.append(tf.get_variable(
+                                            name='weights_scan_bias_{}'.format(i),
+                                            shape=[int(nf)],
+                                            initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.01)))
+
+                        if scale:
+                            self.weights_scan_scale.append(tf.get_variable(
+                                                name='weights_scan_scale_{}'.format(i),
+                                                shape=[int(nf)],
+                                                initializer=tf.ones_initializer()))
+
+                            x = x * self.weights_scan_scale[-1] + self.weights_scan_bias[-1]
+                        else:
+                            x = x + self.weights_scan_bias[-1]
+
+                        if not (fn == 'none'):
+                            x = ACTIVATION_FN[fn](x)
+
+                        self.conv.append(x)
+
+                    # regularization
+                    if not(reuse):
+                        self.reg_loss = group_sparsity_regularizer_1d(
+                                   self.weights_temporal[-1][:,:,:],
+                                   conv_sparse_weight * sp
+                        )
+                        self.reg_loss += smoothness_regularizer_1d(
+                                    self.weights_temporal[-1][:,:,:],
+                                    conv_smooth_weight_temporal * sm
+                        )
+                        tf.losses.add_loss(self.reg_loss, tf.GraphKeys.REGULARIZATION_LOSSES)
+
+                self.output = tf.identity(self.conv[-1], name='output')
+
+
 class StackedFactorizedConv3dAdaptationCore:
     def __init__(self,
                  base,
