@@ -17,7 +17,8 @@ sys.path.insert(0, repo_directory)
 dj.config.load(repo_directory + "conf/dj_conf_cbehrens.json")
 from schema.imaging_schema import *
 from schema.stimulus_schema import MovieQI, DetrendTraces, ChirpQI, OsDsIndexes,\
-    DetrendParams, MouseCamMovieFiltParams, MouseCamMovieFiltering, Stimulus, Calcium2Spikes
+    DetrendParams, MouseCamMovieFiltParams, MouseCamMovieFiltering, Stimulus, \
+    Calcium2Spikes, ClusterAssignment
 from cnn_sys_ident.retina.data import *
 from schema.stimulus_schema import MovieQI
 
@@ -92,6 +93,8 @@ class MultiDatasetWrapper:
                          quality_threshold_movie=0,
                          quality_threshold_chirp=0,
                          quality_threshold_ds=0,
+                         cell_types = [],           #pass a list of cell types to restrict onto certain types
+                         cell_type_crit = "exclude",#whether to exclude or include
                          downsample_size=32,
                          mouse_cam_filt_params=[],
                          color_channels=True,
@@ -232,6 +235,7 @@ class MultiDatasetWrapper:
         scan_sequence_final = [[] for _ in range(self.n_exps)]
         depths_final = [[] for _ in range(self.n_exps)]
         roi_masks_final = [[] for _ in range(self.n_exps)]
+        cluster_assignments_final = [[] for _ in range(self.n_exps)]
         n_scans = 0
         for exp, keys in enumerate(self.key): #go through different experiments
             n_fields = len(keys)
@@ -242,6 +246,7 @@ class MultiDatasetWrapper:
             restriction = [[] for _ in range(n_fields)]
             keys_field = [{} for _ in range(n_fields)]
             roi_masks = [[] for _ in range(n_fields)]
+            cluster_assignments_all = [[] for _ in range(n_fields)]
             depths = [[] for _ in range(n_fields)]
             scan_sequence_idxs = np.zeros(n_fields, dtype=int)
             for i, field_key in enumerate(keys): # go through different fields per experiment
@@ -337,11 +342,28 @@ class MultiDatasetWrapper:
                     assert num_neurons == len(qual_idxs_ds), \
                         "Number of neurons and ds quality indexes not the same"
                 #create Boolean mask which is True for cells that pass quality checks, False otherwise
-
-                quality_mask = np.logical_and(
-                   (qual_idxs_movie > quality_threshold_movie),
-                   np.logical_and((qual_idxs_chirp > quality_threshold_chirp),
-                                  (qual_idxs_ds > quality_threshold_ds)))
+                cluster_assignments = (
+                        ClusterAssignment() & temp_key & detrend_param_key
+                ).fetch("group_id")
+                if len(cell_types) > 0:
+                    assert len(cluster_assignments) == num_neurons, \
+                        "Number of neurons and cluster assignments not the same"
+                    cell_type_mask = np.zeros_like(cluster_assignments, dtype=bool)
+                    for cell_type in cell_types:
+                        cell_type_mask[cluster_assignments == cell_type] = 1
+                    if cell_type_crit == "exclude":
+                        cell_type_mask = np.logical_not(cell_type_mask)
+                else:
+                    cell_type_mask = np.ones(num_neurons, dtype=bool)
+                    if not(len(cluster_assignments) == num_neurons):
+                        cluster_assignments = -1*np.ones(num_neurons, dtype=bool)
+                quality_mask = np.logical_and(cell_type_mask,
+                                              np.logical_and((qual_idxs_movie > quality_threshold_movie),
+                                                             np.logical_and((qual_idxs_chirp > quality_threshold_chirp),
+                                                                            (qual_idxs_ds > quality_threshold_ds)
+                                                                            )
+                                                             )
+                                              )
 
                 if (key["stim_id"] == 5) or (key["stim_id"]==4):
                     responses = np.zeros((num_neurons, 150 * 123))
@@ -361,6 +383,7 @@ class MultiDatasetWrapper:
                 roi_ids_all[i] = roi_ids[quality_mask]
                 movie_qis_all[i] = qual_idxs_movie[quality_mask]
                 num_rois_all[i] = len(qual_idxs_movie[quality_mask])
+                cluster_assignments_all[i] = cluster_assignments[quality_mask]
                 depths[i] = np.zeros(num_rois_all[i])
                 movies = movie_train, movie_test, random_sequences
 
@@ -373,6 +396,7 @@ class MultiDatasetWrapper:
             scan_sequence_final[exp] = scan_sequence_idxs
             depths_final[exp] = depths
             roi_masks_final[exp] = roi_masks
+            cluster_assignments_final[exp] = cluster_assignments_all
         roi_ids_final = [el for sublist in roi_ids_final for el in sublist]
         movie_qis_final = [el for sublist in movie_qis_final for el in sublist]
         responses_final = [el for sublist in responses_final for el in sublist]
@@ -382,6 +406,7 @@ class MultiDatasetWrapper:
         scan_sequence_final = [el for sublist in scan_sequence_final for el in sublist]
         depths_final = [el for sublist in depths_final for el in sublist]
         roi_masks_final = [el for sublist in roi_masks_final for el in sublist]
+        cluster_assignments_final = [el for sublist in cluster_assignments_final for el in sublist]
         multi_dataset = MultiDataset(responses_final,
                                      num_rois_final,
                                      n_scans,
@@ -401,6 +426,7 @@ class MultiDatasetWrapper:
         self.roi_masks = roi_masks_final
         self.roi_ids = roi_ids_final
         self.movie_qis = movie_qis_final
+        self.cluster_assignments = cluster_assignments_final
 
 
 # %%
