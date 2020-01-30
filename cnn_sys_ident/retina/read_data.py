@@ -286,7 +286,8 @@ class MultiDatasetWrapper:
                         (Traces() * Presentation() & field_key).fetch("traces")
                 else: 
                     traces = (
-                            Calcium2Spikes() * Presentation() & field_key
+                            Calcium2Spikes() * Presentation() &
+                            field_key & detrend_param_key
                     ).fetch("spikes")
                 tracestimes = \
                     (Traces() * Presentation() & field_key).fetch("traces_times")
@@ -311,12 +312,11 @@ class MultiDatasetWrapper:
                 qual_idxs_movie = \
                     (MovieQI() & field_key &
                      detrend_param_key).fetch("movie_qi")
-                # if quality_threshold_movie > 0:
-                #     qual_idxs_movie = \
-                #         (MovieQI() & field_key &
-                #          detrend_param_key).fetch("movie_qi")
-                # else:
-                #     qual_idxs_movie = np.ones(num_neurons, dtype=bool)
+                if (quality_threshold_movie > 0) and not(num_neurons == len(qual_idxs_movie)):
+                    assert num_neurons == len(qual_idxs_movie), \
+                        "Number of neurons and movie quality indexes not the same"
+                elif (quality_threshold_movie <= 0) and not(num_neurons == len(qual_idxs_movie)):
+                    qual_idxs_movie = np.ones(num_neurons, dtype=bool)
                 temp_key = deepcopy(field_key)
                 temp_key.pop("stim_id")
                 if quality_threshold_chirp > 0:
@@ -337,7 +337,7 @@ class MultiDatasetWrapper:
                         "Number of neurons and movie quality indexes not the same"
                 if quality_threshold_chirp > 0:
                     assert num_neurons == len(qual_idxs_chirp), \
-                        "Number of neurons and chirp quality indexes not the same"
+                        "Number of neurons and chirp quality indexes not the same for {} : num_neurons {}, num chirp_qi {}".format(temp_key, num_neurons, len(qual_idxs_chirp))
                 if quality_threshold_ds > 0:
                     assert num_neurons == len(qual_idxs_ds), \
                         "Number of neurons and ds quality indexes not the same"
