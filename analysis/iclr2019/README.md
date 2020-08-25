@@ -7,7 +7,9 @@ Alexander S. Ecker, Fabian H. Sinz, Emmanouil Froudarakis, Paul G. Fahey, Santia
 
 ### Preparation
 
-Download the checkpoints and data files (`checkpoints.tar.gz.*`) from [Github](https://github.com/aecker/cnn-sys-ident/releases/tag/iclr19-v1.0) and extract them into the folder [analysis/iclr2019/checkpoints](analysis/iclr2019/checkpoints).
+Download the checkpoints and data files (two files: `checkpoints.tar.gz.aa` and `checkpoints.tar.gz.ab`) from [Github](https://github.com/aecker/cnn-sys-ident/releases/tag/iclr19-v1.0) and extract them into the folder [analysis/iclr2019/checkpoints](analysis/iclr2019/checkpoints) using the following command:
+
+    cat checkpoints.tar.gz.* | tar xvfz -
 
 ## Reproducing models
 
